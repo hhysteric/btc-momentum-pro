@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "btc-momentum-pro",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8766", "-d", "C:\\Users\\hongfuchuan\\Desktop\\btc-momentum-pro"],
+      "port": 8766
+    }
+  ]
+}
