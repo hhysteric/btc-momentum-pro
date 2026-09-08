@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""生成 BTC Momentum 演示 PPT（视觉升级版）。
+"""生成 BTC Momentum 演示 PPT。
 
-设计语言：暗色渐变背景 + 圆角毛玻璃卡片 + 阴影景深 + 渐变装饰线 +
-          径向光晕 + KPI 大字卡片 + Noto Sans SC 多字重排版。
+设计语言：单一深色背景（微渐变，无跨元素装饰线）+ 圆角卡片（纯色填充、
+弱阴影）+ 一个主导色（蓝）+ 语义色仅用于真实的正负数据（绿/红）+
+全篇 Microsoft YaHei（通过 bold 标记区分粗细，不依赖具体字重变体）+
+不在标题下加装饰线、不在卡片上加色条（这两者是明显的 AI 生成痕迹）。
+
 内容与 slides.html / TALK_SCRIPT.md 一一对应；回测数据冻结于 2026-09-07。
 
 用法：python scripts/build_pptx.py
@@ -12,7 +15,7 @@
 from pathlib import Path
 
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
+from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
@@ -20,41 +23,31 @@ from pptx.oxml.ns import qn
 from pptx.oxml import parse_xml
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 配色
+# 配色 —— 蓝色为主导色（约 65% 视觉权重），绿/红仅用于真实的正负数据，
+# 不再使用橙/紫/青作为装饰性强调色。
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-BG_TOP    = "080C12"
-BG_MID    = "0D1117"
-BG_BOT    = "131A24"
-CARD_TOP  = "161B22"
-CARD_BOT  = "1A2030"
-BORDER    = "30363D"
-FG_HEX    = "E6EDF3"
-FG2_HEX   = "8B949E"
+BG_TOP   = "0B0F16"
+BG_BOT   = "121826"
+CARD_BG  = "1A2130"
+CARD_LN  = "323B4E"
 
-FG   = RGBColor(0xE6, 0xED, 0xF3)
-FG2  = RGBColor(0x8B, 0x94, 0x9E)
-FG3  = RGBColor(0x6E, 0x76, 0x81)
+FG   = RGBColor(0xF0, 0xF3, 0xF8)   # 主文字：接近纯白，最高对比度
+FG2  = RGBColor(0xC7, 0xCF, 0xDC)   # 次要文字：仍保持强对比度（不用暗灰）
+MUTE = RGBColor(0x8B, 0x96, 0xAC)   # 仅用于说明性小字（≥11pt 才用）
 
-GREEN  = RGBColor(0x3F, 0xB9, 0x50)
-RED    = RGBColor(0xF8, 0x51, 0x49)
-BLUE   = RGBColor(0x58, 0xA6, 0xFF)
-ORANGE = RGBColor(0xD2, 0x99, 0x22)
-PURPLE = RGBColor(0xBC, 0x8C, 0xFF)
-CYAN   = RGBColor(0x56, 0xD3, 0xF0)
+GREEN  = RGBColor(0x4C, 0xC9, 0x64)   # 正值 / 利好
+RED    = RGBColor(0xF0, 0x66, 0x5E)   # 负值 / 风险
+BLUE   = RGBColor(0x6E, 0xB4, 0xFF)   # 主导色
+BLUE_DARK_HEX = "1A2332"
 
-GREEN_HEX  = "3FB950"
-RED_HEX    = "F85149"
-BLUE_HEX   = "58A6FF"
-ORANGE_HEX = "D29922"
-PURPLE_HEX = "BC8CFF"
-CYAN_HEX   = "56D3F0"
+GREEN_HEX = "4CC964"
+RED_HEX   = "F0665E"
+BLUE_HEX  = "6EB4FF"
 
-# 字体
-FONT_TITLE  = "Noto Sans SC Medium"
-FONT_BODY   = "Noto Sans SC DemiLight"
-FONT_LIGHT  = "Noto Sans SC Light"
-FONT_NUM    = "Segoe UI Semibold"
-FONT_MONO   = "Consolas"
+# 字体 —— 全部使用系统内置常规字体族，粗细用 bold 标记区分，
+# 不指定具体字重变体名称（避免用户系统缺少该变体导致回退渲染）。
+FONT_CJK = "Microsoft YaHei"
+FONT_NUM = "Segoe UI"
 
 EMU_W = Inches(13.333)
 EMU_H = Inches(7.5)
@@ -64,17 +57,23 @@ prs.slide_width = EMU_W
 prs.slide_height = EMU_H
 BLANK = prs.slide_layouts[6]
 
-slide_counter = [0]  # mutable counter for page numbering
+slide_counter = [0]
+TOTAL_SLIDES = 27
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 底层 XML 工具
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def _set_gradient_bg(slide, top=BG_TOP, mid=BG_MID, bot=BG_BOT):
-    """给幻灯片设置三段线性渐变背景。"""
-    cSld = slide._element
-    # remove existing bg if any
+def _set_gradient_bg(slide, top=BG_TOP, bot=BG_BOT):
+    """幻灯片背景：两段微渐变（纯粹用于避免大片纯色的单调感，非装饰线/条）。
+
+    注意：<p:bg> 是 <p:cSld> 的子元素（且必须是其第一个子元素，位于
+    <p:spTree> 之前），不是 <p:sld> 的子元素。之前误插到了 <p:sld> 顶层，
+    导致背景渐变被静默忽略、整页回退成默认白色背景——这也是文字大面积
+    "看不清"的根本原因（白底配了为深色背景设计的浅色文字）。
+    """
+    cSld = slide._element.find(qn('p:cSld'))
     for old in cSld.findall(qn('p:bg')):
         cSld.remove(old)
     bg_xml = f'''
@@ -84,7 +83,6 @@ def _set_gradient_bg(slide, top=BG_TOP, mid=BG_MID, bot=BG_BOT):
         <a:gradFill>
           <a:gsLst>
             <a:gs pos="0"><a:srgbClr val="{top}"/></a:gs>
-            <a:gs pos="50000"><a:srgbClr val="{mid}"/></a:gs>
             <a:gs pos="100000"><a:srgbClr val="{bot}"/></a:gs>
           </a:gsLst>
           <a:lin ang="5400000" scaled="1"/>
@@ -96,27 +94,9 @@ def _set_gradient_bg(slide, top=BG_TOP, mid=BG_MID, bot=BG_BOT):
     cSld.insert(0, bg_el)
 
 
-def _set_shape_gradient(shape, c_top, c_bot, angle=5400000):
-    """给形状设置渐变填充（替换默认 solidFill）。"""
+def _add_shadow(shape, blur=40000, dist=20000, alpha=30000):
+    """弱外阴影，仅提供轻微景深，不影响文字对比度（阴影只在卡片外沿）。"""
     spPr = shape._element.spPr
-    for ch in list(spPr):
-        if ch.tag.endswith('}solidFill') or ch.tag.endswith('}gradFill'):
-            spPr.remove(ch)
-    xml = f'''
-    <a:gradFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-      <a:gsLst>
-        <a:gs pos="0"><a:srgbClr val="{c_top}"/></a:gs>
-        <a:gs pos="100000"><a:srgbClr val="{c_bot}"/></a:gs>
-      </a:gsLst>
-      <a:lin ang="{angle}" scaled="1"/>
-    </a:gradFill>'''
-    spPr.insert(0, parse_xml(xml))
-
-
-def _add_shadow(shape, blur=50800, dist=25400, alpha=35000):
-    """给形状加外阴影。"""
-    spPr = shape._element.spPr
-    # remove old effectLst if present
     for old in spPr.findall(qn('a:effectLst')):
         spPr.remove(old)
     xml = f'''
@@ -131,7 +111,6 @@ def _add_shadow(shape, blur=50800, dist=25400, alpha=35000):
 
 
 def _set_rounded_corners(shape, radius=6000):
-    """设置圆角矩形的圆角半径。"""
     sp = shape._element
     prstGeom = sp.find('.//' + qn('a:prstGeom'))
     if prstGeom is None:
@@ -150,27 +129,7 @@ def _set_rounded_corners(shape, radius=6000):
     avLst.append(gd)
 
 
-def _make_text_gradient(run_element, c1, c2):
-    """给文本 run 设置渐变填色（用于大号标题数字）。"""
-    rPr = run_element.find(qn('a:rPr'))
-    if rPr is None:
-        return
-    # Remove solidFill
-    for sf in rPr.findall(qn('a:solidFill')):
-        rPr.remove(sf)
-    grad_xml = f'''
-    <a:gradFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-      <a:gsLst>
-        <a:gs pos="0"><a:srgbClr val="{c1}"/></a:gs>
-        <a:gs pos="100000"><a:srgbClr val="{c2}"/></a:gs>
-      </a:gsLst>
-      <a:lin ang="5400000" scaled="1"/>
-    </a:gradFill>'''
-    rPr.append(parse_xml(grad_xml))
-
-
 def _remove_table_borders(cell):
-    """删除表格单元格的所有边框。"""
     tc = cell._tc
     tcPr = tc.find(qn('a:tcPr'))
     if tcPr is None:
@@ -186,6 +145,10 @@ def _remove_table_borders(cell):
         tcPr.append(no_ln)
 
 
+def _hex_to_rgb(hex_str):
+    return RGBColor(int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16))
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 高级组件
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -195,21 +158,20 @@ def _set_font(run, size, color, bold=False, italic=False, font=None):
     run.font.color.rgb = color
     run.font.bold = bold
     run.font.italic = italic
-    run.font.name = font or FONT_BODY
+    run.font.name = font or FONT_CJK
+    # 显式设置东亚字体，避免仅设置西文字体名导致 CJK 字形回退不一致。
+    rPr = run._r.find(qn('a:rPr'))
+    if rPr is not None:
+        ea = rPr.find(qn('a:ea'))
+        if ea is None:
+            ea = parse_xml(
+                '<a:ea xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>')
+            rPr.append(ea)
+        ea.set('typeface', font or FONT_CJK)
 
 
-def add_slide(decor=True):
-    """新建幻灯片：渐变背景 + 可选装饰光晕。"""
-    slide_counter[0] += 1
-    s = prs.slides.add_slide(BLANK)
-    _set_gradient_bg(s)
-    if decor:
-        glow_circle(s, Inches(10.5), Inches(-1.5), Inches(4), BLUE_HEX, alpha=8000)
-    return s
-
-
-def glow_circle(slide, left, top, size, color_hex, alpha=10000):
-    """添加径向渐变半透明装饰圆。"""
+def glow_circle(slide, left, top, size, color_hex, alpha=6000):
+    """极弱的径向光晕，仅作背景角落装饰，不与文字重叠，不影响可读性。"""
     shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, left, top, size, size)
     shape.line.fill.background()
     spPr = shape._element.spPr
@@ -230,25 +192,14 @@ def glow_circle(slide, left, top, size, color_hex, alpha=10000):
     return shape
 
 
-def gradient_line(slide, left, top, width, height=Pt(3)):
-    """三色渐变装饰线（蓝→紫→淡出）。"""
-    line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
-    line.line.fill.background()
-    spPr = line._element.spPr
-    for ch in list(spPr):
-        if ch.tag.endswith('}solidFill'):
-            spPr.remove(ch)
-    xml = f'''
-    <a:gradFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
-      <a:gsLst>
-        <a:gs pos="0"><a:srgbClr val="{BLUE_HEX}"/></a:gs>
-        <a:gs pos="50000"><a:srgbClr val="{PURPLE_HEX}"/></a:gs>
-        <a:gs pos="100000"><a:srgbClr val="{PURPLE_HEX}"><a:alpha val="0"/></a:srgbClr></a:gs>
-      </a:gsLst>
-      <a:lin ang="0" scaled="1"/>
-    </a:gradFill>'''
-    spPr.insert(0, parse_xml(xml))
-    return line
+def add_slide(decor=None):
+    """新建幻灯片。decor: 可选 (left, top, size, color_hex) 加一个角落光晕。"""
+    slide_counter[0] += 1
+    s = prs.slides.add_slide(BLANK)
+    _set_gradient_bg(s)
+    if decor:
+        glow_circle(s, *decor)
+    return s
 
 
 def textbox(slide, left, top, width, height, anchor=MSO_ANCHOR.TOP):
@@ -260,122 +211,94 @@ def textbox(slide, left, top, width, height, anchor=MSO_ANCHOR.TOP):
 
 
 def add_title(slide, text, page_num=None):
-    """页面标题：大字 + 渐变下划线 + 可选页码。"""
-    tb, tf = textbox(slide, Inches(0.7), Inches(0.3), Inches(11.0), Inches(0.9))
+    """页面标题：大字加粗，仅靠留白与正文区分——不加下划线、不加色条。"""
+    tb, tf = textbox(slide, Inches(0.7), Inches(0.35), Inches(10.3), Inches(0.85))
     p = tf.paragraphs[0]
     r = p.add_run()
     r.text = text
-    _set_font(r, 30, FG, bold=True, font=FONT_TITLE)
-    gradient_line(slide, Inches(0.7), Inches(1.15), Inches(3.5), Pt(3))
+    _set_font(r, 32, FG, bold=True)
+
     if page_num is None:
         page_num = slide_counter[0]
-    total = 27
-    tb2, tf2 = textbox(slide, Inches(11.5), Inches(0.35), Inches(1.5), Inches(0.5))
+    tb2, tf2 = textbox(slide, Inches(11.5), Inches(0.42), Inches(1.5), Inches(0.5))
     p2 = tf2.paragraphs[0]
     p2.alignment = PP_ALIGN.RIGHT
     r2 = p2.add_run()
-    r2.text = f"{page_num:02d} / {total:02d}"
-    _set_font(r2, 10, FG3, font=FONT_MONO)
+    r2.text = f"{page_num:02d} / {TOTAL_SLIDES:02d}"
+    _set_font(r2, 11, MUTE, font=FONT_NUM)
     return tb
 
 
 def card(slide, left, top, width, height, title, title_color, bullets,
-         accent_hex=None, accent_side="top"):
-    """圆角卡片 + 微渐变 + 阴影 + 可选高亮条。"""
-    # 主卡片
+         body_size=15):
+    """圆角卡片：纯色深底 + 细边框 + 弱阴影。不加顶部/侧边色条。"""
     box = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
-    _set_rounded_corners(box, 7000)
-    _set_shape_gradient(box, CARD_TOP, CARD_BOT)
-    box.line.color.rgb = RGBColor(0x30, 0x36, 0x3D)
-    box.line.width = Pt(0.75)
+    _set_rounded_corners(box, 6000)
+    box.fill.solid()
+    box.fill.fore_color.rgb = _hex_to_rgb(CARD_BG)
+    box.line.color.rgb = _hex_to_rgb(CARD_LN)
+    box.line.width = Pt(1)
     _add_shadow(box)
 
-    # 高亮条
-    if accent_hex:
-        if accent_side == "top":
-            bar = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                left + Inches(0.15), top, width - Inches(0.3), Pt(3))
-            _set_rounded_corners(bar, 50000)
-        else:  # left
-            bar = slide.shapes.add_shape(
-                MSO_SHAPE.ROUNDED_RECTANGLE,
-                left, top + Inches(0.12), Pt(4), height - Inches(0.24))
-            _set_rounded_corners(bar, 50000)
-        bar.fill.solid()
-        bar.fill.fore_color.rgb = RGBColor(
-            int(accent_hex[0:2], 16), int(accent_hex[2:4], 16), int(accent_hex[4:6], 16))
-        bar.line.fill.background()
-
-    # 文本
     tf = box.text_frame
     tf.word_wrap = True
-    tf.margin_left = Inches(0.22)
-    tf.margin_right = Inches(0.22)
-    tf.margin_top = Inches(0.18)
+    tf.margin_left = Inches(0.25)
+    tf.margin_right = Inches(0.25)
+    tf.margin_top = Inches(0.2)
+    tf.margin_bottom = Inches(0.15)
 
     p0 = tf.paragraphs[0]
-    p0.space_after = Pt(8)
+    p0.space_after = Pt(10)
     r = p0.add_run()
     r.text = title
-    _set_font(r, 15, title_color, bold=True, font=FONT_TITLE)
+    _set_font(r, 17, title_color, bold=True)
 
     for b in bullets:
         p = tf.add_paragraph()
-        p.space_after = Pt(5)
+        p.space_after = Pt(7)
         p.space_before = Pt(1)
         r = p.add_run()
-        r.text = "  •  " + b
-        _set_font(r, 13, FG)
+        r.text = "•  " + b
+        _set_font(r, body_size, FG)
     return box
 
 
-def kpi_card(slide, left, top, width, height, number, label,
-             color=GREEN, accent_hex=GREEN_HEX):
-    """KPI 数字卡片：大号数字 + 标签 + 左侧高亮条。"""
+def kpi_card(slide, left, top, width, height, number, label, color=GREEN):
+    """KPI 数字卡片：大号数字居中 + 标签。不加侧边色条。"""
     box = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
-    _set_rounded_corners(box, 8000)
-    _set_shape_gradient(box, CARD_TOP, CARD_BOT)
-    box.line.color.rgb = RGBColor(0x30, 0x36, 0x3D)
-    box.line.width = Pt(0.75)
+    _set_rounded_corners(box, 7000)
+    box.fill.solid()
+    box.fill.fore_color.rgb = _hex_to_rgb(CARD_BG)
+    box.line.color.rgb = _hex_to_rgb(CARD_LN)
+    box.line.width = Pt(1)
     _add_shadow(box)
-
-    # 左侧高亮条
-    bar = slide.shapes.add_shape(
-        MSO_SHAPE.ROUNDED_RECTANGLE,
-        left + Pt(2), top + Inches(0.15), Pt(4), height - Inches(0.3))
-    _set_rounded_corners(bar, 50000)
-    bar.fill.solid()
-    bar.fill.fore_color.rgb = RGBColor(
-        int(accent_hex[0:2], 16), int(accent_hex[2:4], 16), int(accent_hex[4:6], 16))
-    bar.line.fill.background()
 
     tf = box.text_frame
     tf.word_wrap = True
-    tf.margin_left = Inches(0.3)
-    tf.margin_top = Inches(0.12)
+    tf.margin_left = Inches(0.15)
+    tf.margin_right = Inches(0.15)
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
 
     p0 = tf.paragraphs[0]
     p0.alignment = PP_ALIGN.CENTER
     r = p0.add_run()
     r.text = number
-    _set_font(r, 36, color, bold=True, font=FONT_NUM)
+    _set_font(r, 38, color, bold=True, font=FONT_NUM)
 
     p1 = tf.add_paragraph()
     p1.alignment = PP_ALIGN.CENTER
-    p1.space_before = Pt(4)
+    p1.space_before = Pt(5)
     r1 = p1.add_run()
     r1.text = label
-    _set_font(r1, 12, FG2)
+    _set_font(r1, 13, FG2)
     return box
 
 
 def add_table(slide, left, top, width, headers, rows, col_widths=None,
-              header_size=12, cell_size=11, row_h=Inches(0.44)):
-    """美化表格：无边框 + 表头渐变 + 交替行色。"""
+              header_size=14, cell_size=13, row_h=Inches(0.48)):
+    """表格：无边框细线，表头深底、数据行弱交替底色，全部保持高对比度文字。"""
     nrows = len(rows) + 1
     ncols = len(headers)
     height = row_h * nrows
@@ -386,7 +309,6 @@ def add_table(slide, left, top, width, headers, rows, col_widths=None,
         for i, w in enumerate(col_widths):
             gtbl.columns[i].width = w
 
-    # 去除表格默认样式
     tbl_el = gtbl._tbl
     tbl_pr = tbl_el.find(qn('a:tblPr'))
     if tbl_pr is not None:
@@ -396,23 +318,15 @@ def add_table(slide, left, top, width, headers, rows, col_widths=None,
 
     for c, h in enumerate(headers):
         cell = gtbl.cell(0, c)
-        # 表头渐变
-        tc = cell._tc
-        tcPr = tc.find(qn('a:tcPr'))
-        if tcPr is None:
-            tcPr = parse_xml(
-                '<a:tcPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>')
-            tc.append(tcPr)
-        # Add gradient to header
         cell.fill.solid()
-        cell.fill.fore_color.rgb = RGBColor(0x1A, 0x23, 0x32)
+        cell.fill.fore_color.rgb = _hex_to_rgb(BLUE_DARK_HEX)
         _remove_table_borders(cell)
         cell.vertical_anchor = MSO_ANCHOR.MIDDLE
         para = cell.text_frame.paragraphs[0]
         para.alignment = PP_ALIGN.CENTER
         run = para.add_run()
         run.text = h
-        _set_font(run, header_size, FG2, bold=True, font=FONT_TITLE)
+        _set_font(run, header_size, FG, bold=True)
 
     for r_i, row in enumerate(rows, start=1):
         for c_i, val in enumerate(row):
@@ -421,18 +335,13 @@ def add_table(slide, left, top, width, headers, rows, col_widths=None,
             else:
                 text, color = val, FG
             cell = gtbl.cell(r_i, c_i)
-            # 交替行色
-            if r_i % 2 == 1:
-                cell.fill.solid()
-                cell.fill.fore_color.rgb = RGBColor(0x0E, 0x12, 0x19)
-            else:
-                cell.fill.solid()
-                cell.fill.fore_color.rgb = RGBColor(0x12, 0x18, 0x20)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = _hex_to_rgb(CARD_BG if r_i % 2 == 1 else "141B29")
             _remove_table_borders(cell)
             cell.vertical_anchor = MSO_ANCHOR.MIDDLE
             para = cell.text_frame.paragraphs[0]
             para.alignment = PP_ALIGN.CENTER if c_i > 0 else PP_ALIGN.LEFT
-            cell.text_frame.margin_left = Inches(0.12)
+            cell.text_frame.margin_left = Inches(0.15)
             run = para.add_run()
             run.text = text
             _set_font(run, cell_size, color)
@@ -440,96 +349,80 @@ def add_table(slide, left, top, width, headers, rows, col_widths=None,
 
 
 def section_divider(num, title, subtitle=None):
-    """分节页：大号渐变数字 + 装饰光晕 + 标题。"""
-    s = add_slide(decor=False)
-    # 装饰光晕
-    glow_circle(s, Inches(8.5), Inches(1.0), Inches(5), BLUE_HEX, alpha=6000)
-    glow_circle(s, Inches(-1), Inches(3.5), Inches(4), PURPLE_HEX, alpha=5000)
+    """分节页：大号纯色数字 + 角落光晕 + 标题。"""
+    s = add_slide(decor=(Inches(8.8), Inches(0.8), Inches(5), BLUE_HEX))
+    glow_circle(s, Inches(-1.2), Inches(4.2), Inches(4), BLUE_HEX, alpha=4000)
 
-    # 大号数字
-    tb, tf = textbox(s, Inches(0), Inches(1.8), EMU_W, Inches(2.0), MSO_ANCHOR.MIDDLE)
+    tb, tf = textbox(s, Inches(0), Inches(1.7), EMU_W, Inches(2.0), MSO_ANCHOR.MIDDLE)
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER
     r = p.add_run()
     r.text = num
     _set_font(r, 96, BLUE, bold=True, font=FONT_NUM)
-    # 给数字加渐变色
-    _make_text_gradient(r._r, BLUE_HEX, PURPLE_HEX)
 
-    # 标题
-    tb2, tf2 = textbox(s, Inches(0), Inches(4.0), EMU_W, Inches(1.0), MSO_ANCHOR.MIDDLE)
+    tb2, tf2 = textbox(s, Inches(0), Inches(3.9), EMU_W, Inches(1.0), MSO_ANCHOR.MIDDLE)
     p2 = tf2.paragraphs[0]
     p2.alignment = PP_ALIGN.CENTER
     r2 = p2.add_run()
     r2.text = title
-    _set_font(r2, 34, FG, bold=True, font=FONT_TITLE)
+    _set_font(r2, 36, FG, bold=True)
 
     if subtitle:
-        tb3, tf3 = textbox(s, Inches(0), Inches(5.0), EMU_W, Inches(0.7), MSO_ANCHOR.MIDDLE)
+        tb3, tf3 = textbox(s, Inches(0), Inches(4.95), EMU_W, Inches(0.7), MSO_ANCHOR.MIDDLE)
         p3 = tf3.paragraphs[0]
         p3.alignment = PP_ALIGN.CENTER
         r3 = p3.add_run()
         r3.text = subtitle
-        _set_font(r3, 18, FG2, font=FONT_LIGHT)
+        _set_font(r3, 18, FG2)
     return s
 
 
 def add_paragraphs(tf, items, first=False):
-    """items: [(text, color, bold, size, font_override), ...]"""
+    """items: [(text, color, bold, size), ...]"""
     for i, it in enumerate(items):
         text = it[0]
         color = it[1] if len(it) > 1 else FG
         bold = it[2] if len(it) > 2 else False
         size = it[3] if len(it) > 3 and it[3] else 16
-        font = it[4] if len(it) > 4 else None
         p = tf.paragraphs[0] if (first and i == 0) else tf.add_paragraph()
         p.space_after = Pt(10)
         r = p.add_run()
         r.text = text
-        _set_font(r, size, color, bold=bold, font=font)
+        _set_font(r, size, color, bold=bold)
 
 
 # ═══════════════════════════════════════════════════════════
 # SLIDE 1 · 封面
 # ═══════════════════════════════════════════════════════════
-s = add_slide(decor=False)
-# 装饰光晕
-glow_circle(s, Inches(-2), Inches(-1), Inches(7), BLUE_HEX, alpha=7000)
-glow_circle(s, Inches(9), Inches(4), Inches(6), PURPLE_HEX, alpha=6000)
-glow_circle(s, Inches(4), Inches(6), Inches(3), CYAN_HEX, alpha=4000)
+s = add_slide(decor=(Inches(-2), Inches(-1.5), Inches(7), BLUE_HEX))
+glow_circle(s, Inches(9.5), Inches(4.5), Inches(6), BLUE_HEX, alpha=4000)
 
-# 主标题
-tb, tf = textbox(s, Inches(0), Inches(2.0), EMU_W, Inches(1.3), MSO_ANCHOR.MIDDLE)
+tb, tf = textbox(s, Inches(0), Inches(2.15), EMU_W, Inches(1.3), MSO_ANCHOR.MIDDLE)
 p = tf.paragraphs[0]
 p.alignment = PP_ALIGN.CENTER
 r = p.add_run()
 r.text = "BTC Momentum"
-_set_font(r, 54, FG, bold=True, font=FONT_TITLE)
+_set_font(r, 54, FG, bold=True, font=FONT_NUM)
 
-# 渐变横线
-gradient_line(s, Inches(4), Inches(3.35), Inches(5.333), Pt(3))
-
-# 副标题
-tb, tf = textbox(s, Inches(0), Inches(3.7), EMU_W, Inches(0.7), MSO_ANCHOR.MIDDLE)
+tb, tf = textbox(s, Inches(0), Inches(3.35), EMU_W, Inches(0.7), MSO_ANCHOR.MIDDLE)
 p = tf.paragraphs[0]
 p.alignment = PP_ALIGN.CENTER
 r = p.add_run()
 r.text = "JLST 反转-动量多信号策略系统"
-_set_font(r, 22, FG2, font=FONT_LIGHT)
+_set_font(r, 22, FG2)
 
-# 出处信息
 tb, tf = textbox(s, Inches(0), Inches(4.7), EMU_W, Inches(1.6), MSO_ANCHOR.MIDDLE)
 for i, (line, sz, it) in enumerate([
-    ("基于 Jegadeesh, Luo, Subrahmanyam & Titman (2025)", 14, False),
-    ("Review of Financial Studies — 全球顶级金融学术期刊", 13, True),
-    ("回测数据截止 2026-09-07", 13, False),
+    ("基于 Jegadeesh, Luo, Subrahmanyam & Titman (2025)", 15, False),
+    ("Review of Financial Studies — 全球顶级金融学术期刊", 14, True),
+    ("回测数据截止 2026-09-07", 14, False),
 ]):
     p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
     p.alignment = PP_ALIGN.CENTER
-    p.space_after = Pt(6)
+    p.space_after = Pt(7)
     r = p.add_run()
     r.text = line
-    _set_font(r, sz, FG3, italic=it, font=FONT_LIGHT)
+    _set_font(r, sz, FG2, italic=it)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -546,24 +439,21 @@ problems = [
     "找到了好信号，但不知道如何叠加多重确认来提高胜率",
 ]
 for idx, prob in enumerate(problems):
-    y = Inches(1.55) + Inches(0.68) * idx
-    # 小圆点
+    y = Inches(1.5) + Inches(0.66) * idx
     dot = s.shapes.add_shape(MSO_SHAPE.OVAL,
-                             Inches(0.85), y + Inches(0.08), Pt(8), Pt(8))
+                             Inches(0.85), y + Inches(0.1), Pt(9), Pt(9))
     dot.fill.solid()
     dot.fill.fore_color.rgb = BLUE
     dot.line.fill.background()
-    # 文字
     tb, tf = textbox(s, Inches(1.15), y, Inches(11.0), Inches(0.55))
     p = tf.paragraphs[0]
     r = p.add_run()
     r.text = prob
-    _set_font(r, 17, FG, font=FONT_BODY)
+    _set_font(r, 17, FG)
 
 card(s, Inches(0.7), Inches(5.35), Inches(11.9), Inches(1.5),
      "BTC Momentum 的价值", BLUE,
-     ["JLST 理论信号 + MA 均线多重过滤 → 用学术框架确定方向，用趋势滤波提高精度"],
-     accent_hex=BLUE_HEX)
+     ["JLST 理论信号 + MA 均线多重过滤 → 用学术框架确定方向，用趋势滤波提高精度"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -575,23 +465,20 @@ add_title(s, "论文出处")
 card(s, Inches(0.7), Inches(1.45), Inches(11.9), Inches(1.45),
      "N. Jegadeesh, J. Luo, A. Subrahmanyam, S. Titman (2025)", FG,
      ['"Short-Term Reversals and Longer-Term Momentum around the World"',
-      "Review of Financial Studies (RFS) — 金融学三大顶刊之一"],
-     accent_hex=BLUE_HEX)
+      "Review of Financial Studies (RFS) — 金融学三大顶刊之一"])
 
 card(s, Inches(0.7), Inches(3.15), Inches(5.65), Inches(3.4),
      "论文做了什么？", BLUE,
      ["研究了 39 个国家股票市场",
       "用同一模型解释\"短期反转\"与\"中长期动量\"如何同时存在",
-      "发现噪声交易是两者联系的关键纽带"],
-     accent_hex=BLUE_HEX)
+      "发现噪声交易是两者联系的关键纽带"])
 
 card(s, Inches(6.75), Inches(3.15), Inches(5.85), Inches(3.4),
      "我们做了什么？", GREEN,
      ["将论文理论应用到 BTC 市场",
       "构建实时仪表盘，每日更新",
       "叠加 MA 多信号过滤，将理论收益变为实操策略",
-      "开放可配置滤波条件，用户自行调优"],
-     accent_hex=GREEN_HEX)
+      "开放可配置滤波条件，用户自行调优"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -604,40 +491,37 @@ s = add_slide()
 add_title(s, "短期反转 vs 中长期动量")
 
 card(s, Inches(0.7), Inches(1.5), Inches(5.65), Inches(2.5),
-     "短期反转", ORANGE,
+     "短期反转", BLUE,
      ["\"涨多了会回、跌多了会弹\"",
       "短期价格含大量情绪化过度反应，几天内被纠正",
-      "策略：短期逆着最近几天的极端走"],
-     accent_hex=ORANGE_HEX)
+      "策略：短期逆着最近几天的极端走"])
 
 card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(2.5),
      "中长期动量", GREEN,
      ["\"强者恒强、弱者恒弱\"",
       "过去几个月上涨的往往继续涨，趋势有惯性",
-      "策略：中长期顺着大趋势走"],
-     accent_hex=GREEN_HEX)
+      "策略：中长期顺着大趋势走"])
 
 card(s, Inches(0.7), Inches(4.2), Inches(11.9), Inches(2.6),
-     "如何共存？——噪声交易者是关键", PURPLE,
+     "如何共存？——噪声交易者是关键", FG,
      ["两者作用在不同时间尺度上，并不冲突",
       "噪声交易者制造短期过度波动（反转来源），其行为在中期形成趋势（动量来源）",
       "噪声越大 → 反转机会越明显；噪声越小、趋势越干净 → 动量越可靠",
-      "模型用噪声大小动态调整反转/动量权重 —— 这是它比固定参数指标聪明的地方"],
-     accent_hex=PURPLE_HEX)
+      "模型用噪声大小动态调整反转/动量权重 —— 这是它比固定参数指标聪明的地方"])
 
 # -- 综合评分公式
 s = add_slide()
 add_title(s, "综合评分公式")
 
-# 公式卡片
 formula_box = s.shapes.add_shape(
     MSO_SHAPE.ROUNDED_RECTANGLE,
-    Inches(1.2), Inches(2.0), Inches(10.9), Inches(1.5))
-_set_rounded_corners(formula_box, 8000)
-_set_shape_gradient(formula_box, "1A2332", "1E2940")
-formula_box.line.color.rgb = RGBColor(0x30, 0x3E, 0x55)
+    Inches(1.0), Inches(2.0), Inches(11.3), Inches(1.5))
+_set_rounded_corners(formula_box, 7000)
+formula_box.fill.solid()
+formula_box.fill.fore_color.rgb = _hex_to_rgb(BLUE_DARK_HEX)
+formula_box.line.color.rgb = _hex_to_rgb("2E4160")
 formula_box.line.width = Pt(1)
-_add_shadow(formula_box, blur=63500, dist=38100, alpha=40000)
+_add_shadow(formula_box, blur=50000, dist=25000, alpha=35000)
 
 tf = formula_box.text_frame
 tf.word_wrap = True
@@ -646,13 +530,13 @@ p = tf.paragraphs[0]
 p.alignment = PP_ALIGN.CENTER
 r = p.add_run()
 r.text = "Composite = w₁·z(Rev) + w₂·z(Mom) + w₃·z(FundingRate)"
-_set_font(r, 24, BLUE, bold=True, font=FONT_NUM)
+_set_font(r, 22, BLUE, bold=True, font=FONT_NUM)
 
-tb, tf = textbox(s, Inches(0.8), Inches(3.9), Inches(11.7), Inches(2.8))
+tb, tf = textbox(s, Inches(0.7), Inches(3.9), Inches(11.9), Inches(2.8))
 add_paragraphs(tf, [
     ("三个分量先做标准化（z-score），再按动态权重加权求和。", FG, False, 16),
     ("权重不是固定的，而是根据当前市场噪声大小实时计算。", FG, False, 16),
-    ("BTC 适配版额外引入资金费率、波动率分档、减半周期等加密市场特有因子。", FG2, False, 14),
+    ("BTC 适配版额外引入资金费率、波动率分档、减半周期等加密市场特有因子。", FG2, False, 15),
 ], first=True)
 
 
@@ -668,15 +552,13 @@ card(s, Inches(0.7), Inches(1.5), Inches(11.9), Inches(2.2),
      "评分如何变成信号", FG,
      ["综合评分向上突破阈值 → 做多信号（绿色↑）",
       "综合评分向下跌破阈值 → 做空信号（红色↓）",
-      "多个条件同时触发 → 级联预警（紫色⚡，强信号）"],
-     accent_hex=BLUE_HEX)
+      "多个条件同时触发 → 级联预警（强信号）"])
 
 card(s, Inches(0.7), Inches(3.95), Inches(11.9), Inches(2.7),
      "JLST 原始信号前瞻回报（无 MA 滤波）", GREEN,
      ["做多信号 30 天平均 +10.71%，胜率 58%",
       "问题：部分做多信号出现在下跌趋势里（逆势抄底），容易吃套",
-      "→ 这正是叠加均线滤波的动机"],
-     accent_hex=GREEN_HEX)
+      "→ 这正是叠加均线滤波的动机"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -692,21 +574,18 @@ card(s, Inches(0.7), Inches(1.5), Inches(5.65), Inches(3.2),
      ["① 价格 > MA110（大趋势向上）",
       "② MA6 > MA103（短期走强）",
       "③ 价格 > EMA50（中期向上）",
-      "只有 JLST 做多信号 + 三条件全满足 = 高质量信号"],
-     accent_hex=GREEN_HEX)
+      "只有 JLST 做多信号 + 三条件全满足 = 高质量信号"])
 
 card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(3.2),
      "做空滤波（价格在均线下方）", RED,
      ["价格 < MA110",
       "价格 < EMA50",
-      "要求价格在均线下方才保留做空信号"],
-     accent_hex=RED_HEX)
+      "要求价格在均线下方才保留做空信号"])
 
 card(s, Inches(0.7), Inches(4.9), Inches(11.9), Inches(1.8),
      "为什么 MA 滤波有效 + 用户可配置", BLUE,
      ["均线是趋势的过滤网：筛掉逆势信号（亏损主要来源），只留顺势信号",
-      "三个开关用户自主控制：全勾最严格、可只留一两个、可全取消看原始信号，实时重新统计前瞻收益"],
-     accent_hex=BLUE_HEX)
+      "三个开关用户自主控制：全勾最严格、可只留一两个、可全取消看原始信号，实时重新统计前瞻收益"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -732,30 +611,25 @@ add_table(s, Inches(0.9), Inches(1.55), Inches(11.5),
 card(s, Inches(0.9), Inches(5.05), Inches(11.5), Inches(1.7),
      "核心结论", GREEN,
      ["做多三重滤波后 30 天平均收益 +10.71% → +20.52%（超额 +9.82 个百分点，相对提升 92%）",
-      "胜率 58% → 62%。过滤逆势信号是获取超额回报的关键"],
-     accent_hex=GREEN_HEX)
+      "胜率 58% → 62%。过滤逆势信号是获取超额回报的关键"])
 
 # -- 做多最强阿尔法
 s = add_slide()
 add_title(s, "做多策略 — 最强阿尔法")
 
 kpi_card(s, Inches(0.7), Inches(1.5), Inches(3.6), Inches(1.7),
-         "+20.52%", "多信号做多 30 日均收益",
-         GREEN, GREEN_HEX)
+         "+20.52%", "多信号做多 30 日均收益", GREEN)
 kpi_card(s, Inches(4.65), Inches(1.5), Inches(3.6), Inches(1.7),
-         "67%", "3 天胜率",
-         GREEN, GREEN_HEX)
+         "67%", "3 天胜率", GREEN)
 kpi_card(s, Inches(8.6), Inches(1.5), Inches(3.95), Inches(1.7),
-         "85 → 42", "信号次数（少而精）",
-         BLUE, BLUE_HEX)
+         "85 → 42", "信号次数（少而精）", BLUE)
 
 card(s, Inches(0.7), Inches(3.5), Inches(11.9), Inches(3.2),
      "解读", FG,
      ["三重滤波把做多信号从 85 次精简到 42 次 —— 宁可少做，也要做对",
       "各持有期收益全面提升：1天 +55%、3天 +74%、7天 +86%、30天 +92%",
       "胜率区间从 58-65% 抬升到 62-67%",
-      "这是整套策略里最稳定、最值得依赖的部分"],
-     accent_hex=GREEN_HEX)
+      "这是整套策略里最稳定、最值得依赖的部分"])
 
 # -- 做空
 s = add_slide()
@@ -772,41 +646,35 @@ add_table(s, Inches(0.9), Inches(1.55), Inches(11.5),
           col_widths=[Inches(2.3), Inches(3.2), Inches(3.2), Inches(2.8)])
 
 card(s, Inches(0.9), Inches(5.05), Inches(11.5), Inches(1.7),
-     "解读", ORANGE,
+     "解读", RED,
      ["BTC 长期上行，做空天然逆风：做空 30 天平均 -3.61%、胜率仅 42%",
       "均线下方常是超跌区，加滤波后短期反而更弱、易遇反弹",
-      "做空的定位是风险预警与对冲，不宜作为主进攻策略"],
-     accent_hex=ORANGE_HEX)
+      "做空的定位是风险预警与对冲，不宜作为主进攻策略"])
 
 # -- 核心数据总结
 s = add_slide()
 add_title(s, "核心数据总结")
 
 kpi_card(s, Inches(0.7), Inches(1.5), Inches(3.6), Inches(1.5),
-         "+20.52%", "做多 30 日均收益",
-         GREEN, GREEN_HEX)
+         "+20.52%", "做多 30 日均收益", GREEN)
 kpi_card(s, Inches(4.65), Inches(1.5), Inches(3.6), Inches(1.5),
-         "+92%", "30 日超额提升",
-         BLUE, BLUE_HEX)
+         "+92%", "30 日超额提升", BLUE)
 kpi_card(s, Inches(8.6), Inches(1.5), Inches(3.95), Inches(1.5),
-         "67%", "3 日胜率（做多）",
-         ORANGE, ORANGE_HEX)
+         "67%", "3 日胜率（做多）", GREEN)
 
 card(s, Inches(0.7), Inches(3.3), Inches(5.65), Inches(3.3),
      "做多策略结论", GREEN,
      ["MA 滤波后 30 日收益近乎翻倍",
       "胜率 58-65% → 62-67%",
       "信号数 85 → 42（少而精）",
-      "每次信号平均 30 日赚 20.52%"],
-     accent_hex=GREEN_HEX)
+      "每次信号平均 30 日赚 20.52%"])
 
 card(s, Inches(6.75), Inches(3.3), Inches(5.85), Inches(3.3),
      "做空策略结论", RED,
      ["做空收益整体偏弱（BTC 长期上行）",
       "无滤波 30 日 -3.61%，滤波改善有限",
       "信号数 109 → 45（过滤假信号）",
-      "更适合防御/对冲，不做主策略"],
-     accent_hex=RED_HEX)
+      "更适合防御/对冲，不做主策略"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -822,23 +690,20 @@ card(s, Inches(0.7), Inches(1.5), Inches(5.65), Inches(2.4),
      "价格同轴（趋势）", BLUE,
      ["MA6 · EMA50 · EMA110",
       "MA103 · MA110 · MA200",
-      "已实现价格"],
-     accent_hex=BLUE_HEX)
+      "已实现价格"])
 
 card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(2.4),
-     "独立轴（估值/链上/情绪）", PURPLE,
+     "独立轴（估值/链上/情绪）", BLUE,
      ["成交量 · RSI · Mayer · MVRV · NUPL",
       "SMM · 卖方衰竭 · 风险回报",
-      "ETF · USDT.D · BTC.D"],
-     accent_hex=PURPLE_HEX)
+      "ETF · USDT.D · BTC.D"])
 
 card(s, Inches(0.7), Inches(4.1), Inches(11.9), Inches(2.6),
      "特色功能", GREEN,
-     ["📌 信号标记：一键叠加 JLST 买卖信号（绿↑做多 / 红↓做空 / 紫⚡级联）",
+     ["信号标记：一键叠加 JLST 买卖信号（绿↑做多 / 红↓做空 / 强信号⚡级联）",
       "对数坐标：长周期看 BTC 更合理",
       "坐标翻转：USDT.D / BTC.D 可翻转，直观看与价格的反向关系",
-      "日线/周线切换：指标与信号标记自动适配周线聚合"],
-     accent_hex=GREEN_HEX)
+      "日线/周线切换：指标与信号标记自动适配周线聚合"])
 
 # -- 实操流程
 s = add_slide()
@@ -853,31 +718,28 @@ steps = [
 ]
 for idx, (num, text, color) in enumerate(steps):
     y = Inches(1.55) + Inches(0.72) * idx
-    # 数字圆
     circ = s.shapes.add_shape(MSO_SHAPE.OVAL,
                               Inches(0.85), y + Inches(0.03), Inches(0.38), Inches(0.38))
-    _set_shape_gradient(circ, BLUE_HEX, PURPLE_HEX)
+    circ.fill.solid()
+    circ.fill.fore_color.rgb = BLUE
     circ.line.fill.background()
-    _add_shadow(circ, blur=25400, dist=12700, alpha=25000)
     ctf = circ.text_frame
     ctf.vertical_anchor = MSO_ANCHOR.MIDDLE
     cp = ctf.paragraphs[0]
     cp.alignment = PP_ALIGN.CENTER
     cr = cp.add_run()
     cr.text = num
-    _set_font(cr, 13, FG, bold=True, font=FONT_NUM)
-    # 文字
+    _set_font(cr, 14, RGBColor(0x0B, 0x0F, 0x16), bold=True, font=FONT_NUM)
     tb, tf = textbox(s, Inches(1.4), y, Inches(10.5), Inches(0.5))
     p = tf.paragraphs[0]
     r = p.add_run()
     r.text = text
-    _set_font(r, 18, color, bold=True, font=FONT_BODY)
+    _set_font(r, 18, color, bold=True)
 
 card(s, Inches(0.7), Inches(5.2), Inches(11.9), Inches(1.6),
      "最佳实践", BLUE,
      ["做多 + 三 MA 全满足 = 最高质量信号（历史 30 日 +20.52%）",
-      "做空在牛市中谨慎，作减仓/对冲依据；信号约 30 天一次，属低频高质量策略"],
-     accent_hex=BLUE_HEX)
+      "做空在牛市中谨慎，作减仓/对冲依据；信号约 30 天一次，属低频高质量策略"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -899,13 +761,11 @@ add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
               ["MA200", "200 日简单平均", "长期牛熊线；也是 Mayer 倍数的分母"],
           ],
           col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=10.5, row_h=Inches(0.55))
+          cell_size=13, header_size=14, row_h=Inches(0.6))
 
-card(s, Inches(0.6), Inches(5.6), Inches(12.1), Inches(1.15),
+card(s, Inches(0.6), Inches(5.75), Inches(12.1), Inches(1.15),
      "SMA vs EMA", BLUE,
-     ["SMA 窗口内等权、平滑但滞后；EMA 用衰减系数 α 给近期更高权重、转向更快但更易受噪声影响。"
-      "趋势策略里两者互补。"],
-     accent_hex=BLUE_HEX)
+     ["SMA 窗口内等权、平滑但滞后；EMA 用衰减系数 α 给近期更高权重、转向更快但更易受噪声影响，趋势策略里两者互补。"])
 
 # -- 估值类
 s = add_slide()
@@ -920,12 +780,11 @@ add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
               ["MVRV", "市值 ÷ 已实现市值", ">3.7 顶部风险；<1 深度低估。全网未实现盈亏比"],
           ],
           col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=10.5, row_h=Inches(0.7))
+          cell_size=13, header_size=14, row_h=Inches(0.75))
 
-card(s, Inches(0.6), Inches(5.15), Inches(12.1), Inches(1.3),
+card(s, Inches(0.6), Inches(5.15), Inches(12.1), Inches(1.4),
      "为什么重要", GREEN,
-     ["估值类提供「贵不贵」的锚，与趋势类「涨不涨」互补——趋势告诉你方向，估值告诉你位置。"],
-     accent_hex=GREEN_HEX)
+     ["估值类提供「贵不贵」的锚，与趋势类「涨不涨」互补——趋势告诉你方向，估值告诉你位置。"])
 
 # -- 链上情绪
 s = add_slide()
@@ -941,13 +800,13 @@ add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
               ["风险回报", "历史价格分布的下行风险 vs 上行空间比值", "越低=当前介入性价比越高"],
           ],
           col_widths=[Inches(2.6), Inches(5.0), Inches(4.5)],
-          cell_size=10, row_h=Inches(0.62))
+          cell_size=12.5, header_size=13.5, row_h=Inches(0.68))
 
-tb, tf = textbox(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(0.6))
+tb, tf = textbox(s, Inches(0.6), Inches(6.25), Inches(12.1), Inches(0.6))
 p = tf.paragraphs[0]
 r = p.add_run()
 r.text = "链上数据来自 CryptoQuant，按日期对齐到 K 线；周线视图取每周最后一个值。"
-_set_font(r, 11, FG3, font=FONT_LIGHT)
+_set_font(r, 12, MUTE)
 
 # -- 资金流与情绪
 s = add_slide()
@@ -965,44 +824,37 @@ add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
                "正=多头拥挤；极端正值常预示回调"],
           ],
           col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=10, row_h=Inches(0.62))
+          cell_size=12.5, header_size=13.5, row_h=Inches(0.68))
 
-card(s, Inches(0.6), Inches(5.35), Inches(12.1), Inches(1.35),
-     "资金费率的特殊地位", ORANGE,
-     ["它是 JLST 动态权重中噪声代理的组成部分（占 30% 权重）——"
-      "费率越极端，模型越调低动量权重、调高反转权重。"],
-     accent_hex=ORANGE_HEX)
+card(s, Inches(0.6), Inches(5.85), Inches(12.1), Inches(1.15),
+     "资金费率的特殊地位", BLUE,
+     ["它是 JLST 动态权重中噪声代理的组成部分（占 30% 权重）——费率越极端，模型越调低动量权重、调高反转权重。"])
 
 # -- 适用场景
 s = add_slide()
 add_title(s, "什么情况下最适合用多策略？")
 
 card(s, Inches(0.5), Inches(1.5), Inches(3.9), Inches(4.0),
-     "✅ 最适合", GREEN,
+     "最适合", GREEN,
      ["明确趋势市：价格站上 MA110/EMA50，做多胜率 62-67%",
       "中长线持有（1-4 周）：30 日收益差距最大",
-      "右侧交易者：愿放弃最低点换确定性"],
-     accent_hex=GREEN_HEX)
+      "右侧交易者：愿放弃最低点换确定性"], body_size=14)
 
 card(s, Inches(4.65), Inches(1.5), Inches(3.9), Inches(4.0),
-     "⚠️ 谨慎", ORANGE,
+     "谨慎", FG,
      ["震荡/横盘市：均线频繁穿越，滤波反复触发又失效",
       "做空：BTC 长期上行，整体为负，仅作预警",
-      "短持有期（1-3 日）：超额小，成本占比高"],
-     accent_hex=ORANGE_HEX)
+      "短持有期（1-3 日）：超额小，成本占比高"], body_size=14)
 
 card(s, Inches(8.8), Inches(1.5), Inches(3.9), Inches(4.0),
-     "❌ 不适合", RED,
+     "不适合", RED,
      ["日内/高频：信号约 30 天一次，频率不匹配",
       "黑天鹅急跌：任何趋势滤波都滞后",
-      "当自动交易机器人：它是决策辅助，非全自动"],
-     accent_hex=RED_HEX)
+      "当自动交易机器人：它是决策辅助，非全自动"], body_size=14)
 
 card(s, Inches(0.5), Inches(5.7), Inches(12.2), Inches(1.15),
      "一句话", BLUE,
-     ["多策略的超额收益来自「在趋势里做多、并用均线把逆势信号筛掉」。"
-      "趋势越明确、持有期越长，价值越大；越震荡、越短线，价值越小。"],
-     accent_hex=BLUE_HEX)
+     ["多策略的超额收益来自「在趋势里做多、并用均线把逆势信号筛掉」。趋势越明确、持有期越长，价值越大；越震荡、越短线，价值越小。"])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1024,12 +876,11 @@ caveats = [
 ]
 for idx, text in enumerate(caveats):
     y = Inches(1.5) + Inches(0.62) * idx
-    # 小三角警示图标
-    tri = s.shapes.add_shape(MSO_SHAPE.OVAL,
-                             Inches(0.85), y + Inches(0.06), Pt(8), Pt(8))
-    tri.fill.solid()
-    tri.fill.fore_color.rgb = ORANGE
-    tri.line.fill.background()
+    dot = s.shapes.add_shape(MSO_SHAPE.OVAL,
+                             Inches(0.85), y + Inches(0.08), Pt(9), Pt(9))
+    dot.fill.solid()
+    dot.fill.fore_color.rgb = RED
+    dot.line.fill.background()
     tb, tf = textbox(s, Inches(1.15), y, Inches(11.2), Inches(0.5))
     p = tf.paragraphs[0]
     r = p.add_run()
@@ -1037,38 +888,31 @@ for idx, text in enumerate(caveats):
     _set_font(r, 15, FG)
 
 card(s, Inches(0.7), Inches(5.4), Inches(11.9), Inches(1.35),
-     "正确定位", ORANGE,
-     ["BTC Momentum 是辅助决策工具，帮你过滤噪声、提供学术框架支撑的方向判断，"
-      "但最终决策权在你——不是自动赚钱机器。"],
-     accent_hex=ORANGE_HEX)
+     "正确定位", FG,
+     ["BTC Momentum 是辅助决策工具，帮你过滤噪声、提供学术框架支撑的方向判断，但最终决策权在你——不是自动赚钱机器。"])
 
 # -- 总结
-s = add_slide(decor=False)
+s = add_slide(decor=(Inches(9.2), Inches(4.8), Inches(5), BLUE_HEX))
 add_title(s, "总结")
-# 装饰
-glow_circle(s, Inches(9), Inches(4.5), Inches(5), BLUE_HEX, alpha=5000)
-glow_circle(s, Inches(-1.5), Inches(5), Inches(4), PURPLE_HEX, alpha=4000)
+glow_circle(s, Inches(-1.5), Inches(5), Inches(4), BLUE_HEX, alpha=4000)
 
 card(s, Inches(0.7), Inches(1.5), Inches(5.65), Inches(2.5),
-     "🔬  理论基础", BLUE,
+     "理论基础", BLUE,
      ["JLST (2025) RFS 论文 — 39 国验证",
       "短期反转 + 中长期动量双因子",
-      "噪声交易者是关键中介变量"],
-     accent_hex=BLUE_HEX)
+      "噪声交易者是关键中介变量"])
 
 card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(2.5),
-     "🎯  多信号策略", GREEN,
+     "多信号策略", GREEN,
      ["JLST 信号 + MA110/MA6>MA103/EMA50",
       "做多 30 日 +20.52%（胜率 62%）",
-      "超额比原始信号提升 92%"],
-     accent_hex=GREEN_HEX)
+      "超额比原始信号提升 92%"])
 
 card(s, Inches(0.7), Inches(4.2), Inches(11.9), Inches(2.5),
-     "🖥️  工具特色", PURPLE,
+     "工具特色", BLUE,
      ["每日自动更新数据 · 近 20 个技术/链上指标 + 信号标记",
       "5 个可配置 MA 滤波条件 · 日线/周线 · 暗/亮主题 · 三图时间轴联动",
-      "把严谨的学术框架，变成你每天都能打开、看得懂、用得上的东西"],
-     accent_hex=PURPLE_HEX)
+      "把严谨的学术框架，变成你每天都能打开、看得懂、用得上的东西"])
 
 # ── 保存 ──
 out = Path(__file__).resolve().parent.parent / "BTC_Momentum_演示.pptx"
