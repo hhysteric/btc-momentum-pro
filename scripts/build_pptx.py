@@ -58,7 +58,7 @@ prs.slide_height = EMU_H
 BLANK = prs.slide_layouts[6]
 
 slide_counter = [0]
-TOTAL_SLIDES = 27
+TOTAL_SLIDES = 21
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -539,6 +539,29 @@ add_paragraphs(tf, [
     ("BTC 适配版额外引入资金费率、波动率分档、减半周期等加密市场特有因子。", FG2, False, 15),
 ], first=True)
 
+# -- 如何映射到 BTC
+s = add_slide()
+add_title(s, "如何把股票论文映射到 BTC")
+
+card(s, Inches(0.7), Inches(1.45), Inches(5.65), Inches(3.3),
+     "论文原始设定（股票）", FG,
+     ["研究对象：39 国股票市场的横截面",
+      "反转 / 动量：跨个股排序、多空组合",
+      "噪声代理：换手率、买卖价差等微观结构变量",
+      "因子在个股之间比较，赚的是横截面价差"])
+
+card(s, Inches(6.75), Inches(1.45), Inches(5.85), Inches(3.3),
+     "BTC 适配版（单一资产·时序）", GREEN,
+     ["研究对象：BTC 单一资产的时间序列",
+      "反转 / 动量：同一资产不同时间尺度的自相关",
+      "噪声代理：资金费率 + 波动率分档（占 30% 权重）",
+      "额外引入减半周期等加密特有因子"])
+
+card(s, Inches(0.7), Inches(4.95), Inches(11.9), Inches(1.75),
+     "映射的核心难点与解法", BLUE,
+     ["难点：论文靠「多只股票横向比较」，BTC 只有一个标的，无法做横截面排序",
+      "解法：把「跨资产比较」改成「跨时间尺度比较」——短期 z 分做反转、中长期 z 分做动量，噪声代理换成加密市场能实时观测的资金费率与波动率"])
+
 
 # ═══════════════════════════════════════════════════════════
 # SECTION 02 · 信号系统
@@ -678,157 +701,9 @@ card(s, Inches(6.75), Inches(3.3), Inches(5.85), Inches(3.3),
 
 
 # ═══════════════════════════════════════════════════════════
-# SECTION 05 · 仪表盘功能
+# SECTION 05 · 适用边界
 # ═══════════════════════════════════════════════════════════
-section_divider("05", "仪表盘功能", "看得懂、用得上")
-
-# -- K 线图
-s = add_slide()
-add_title(s, "交互式 K 线图")
-
-card(s, Inches(0.7), Inches(1.5), Inches(5.65), Inches(2.4),
-     "价格同轴（趋势）", BLUE,
-     ["MA6 · EMA50 · EMA110",
-      "MA103 · MA110 · MA200",
-      "已实现价格"])
-
-card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(2.4),
-     "独立轴（估值/链上/情绪）", BLUE,
-     ["成交量 · RSI · Mayer · MVRV · NUPL",
-      "SMM · 卖方衰竭 · 风险回报",
-      "ETF · USDT.D · BTC.D"])
-
-card(s, Inches(0.7), Inches(4.1), Inches(11.9), Inches(2.6),
-     "特色功能", GREEN,
-     ["信号标记：一键叠加 JLST 买卖信号（绿↑做多 / 红↓做空 / 强信号⚡级联）",
-      "对数坐标：长周期看 BTC 更合理",
-      "坐标翻转：USDT.D / BTC.D 可翻转，直观看与价格的反向关系",
-      "日线/周线切换：指标与信号标记自动适配周线聚合"])
-
-# -- 实操流程
-s = add_slide()
-add_title(s, "实操流程")
-
-steps = [
-    ("①", "看综合评分和信号方向", FG),
-    ("②", "看三个 MA 滤波灯是否都绿", FG),
-    ("③", "全绿 = 最高质量做多信号", GREEN),
-    ("④", "结合估值指标（MVRV、NUPL、Mayer）做二次确认", FG),
-    ("⑤", "自己决定仓位", FG),
-]
-for idx, (num, text, color) in enumerate(steps):
-    y = Inches(1.55) + Inches(0.72) * idx
-    circ = s.shapes.add_shape(MSO_SHAPE.OVAL,
-                              Inches(0.85), y + Inches(0.03), Inches(0.38), Inches(0.38))
-    circ.fill.solid()
-    circ.fill.fore_color.rgb = BLUE
-    circ.line.fill.background()
-    ctf = circ.text_frame
-    ctf.vertical_anchor = MSO_ANCHOR.MIDDLE
-    cp = ctf.paragraphs[0]
-    cp.alignment = PP_ALIGN.CENTER
-    cr = cp.add_run()
-    cr.text = num
-    _set_font(cr, 14, RGBColor(0x0B, 0x0F, 0x16), bold=True, font=FONT_NUM)
-    tb, tf = textbox(s, Inches(1.4), y, Inches(10.5), Inches(0.5))
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = text
-    _set_font(r, 18, color, bold=True)
-
-card(s, Inches(0.7), Inches(5.2), Inches(11.9), Inches(1.6),
-     "最佳实践", BLUE,
-     ["做多 + 三 MA 全满足 = 最高质量信号（历史 30 日 +20.52%）",
-      "做空在牛市中谨慎，作减仓/对冲依据；信号约 30 天一次，属低频高质量策略"])
-
-
-# ═══════════════════════════════════════════════════════════
-# SECTION 06 · 指标撰写规则
-# ═══════════════════════════════════════════════════════════
-section_divider("06", "K 线指标撰写规则", "每个指标怎么算、怎么读")
-
-# -- 趋势均线
-s = add_slide()
-add_title(s, "趋势均线：MA 与 EMA")
-
-add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
-          ["指标", "计算规则", "解读"],
-          [
-              ["MA6", "近 6 日收盘价简单平均 SMA(close,6)", "超短期趋势；与 MA103 交叉用作多滤波"],
-              ["EMA50", "50 日指数移动平均，α=2/51，近期权重更高", "中期趋势线；站上=多头，跌破=空头"],
-              ["EMA110", "110 日指数移动平均", "牛熊分界参考，比 SMA 反应更快"],
-              ["MA103 / MA110", "103 / 110 日简单平均", "周期性中长期支撑/压力（BTC 半年级别）"],
-              ["MA200", "200 日简单平均", "长期牛熊线；也是 Mayer 倍数的分母"],
-          ],
-          col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=13, header_size=14, row_h=Inches(0.6))
-
-card(s, Inches(0.6), Inches(5.75), Inches(12.1), Inches(1.15),
-     "SMA vs EMA", BLUE,
-     ["SMA 窗口内等权、平滑但滞后；EMA 用衰减系数 α 给近期更高权重、转向更快但更易受噪声影响，趋势策略里两者互补。"])
-
-# -- 估值类
-s = add_slide()
-add_title(s, "估值类：Mayer / 已实现价格 / MVRV")
-
-add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
-          ["指标", "计算规则", "解读"],
-          [
-              ["Mayer 倍数", "价格 ÷ MA200", ">2.4 顶部区；<1 低估区。衡量偏离长期均线程度"],
-              ["已实现价格", "每枚 BTC「最后移动时价格」加权平均（全网成本）",
-               "市场平均持仓成本线；跌破=多数人浮亏，历史大底常在此"],
-              ["MVRV", "市值 ÷ 已实现市值", ">3.7 顶部风险；<1 深度低估。全网未实现盈亏比"],
-          ],
-          col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=13, header_size=14, row_h=Inches(0.75))
-
-card(s, Inches(0.6), Inches(5.15), Inches(12.1), Inches(1.4),
-     "为什么重要", GREEN,
-     ["估值类提供「贵不贵」的锚，与趋势类「涨不涨」互补——趋势告诉你方向，估值告诉你位置。"])
-
-# -- 链上情绪
-s = add_slide()
-add_title(s, "链上情绪：NUPL / SMM / 卖方衰竭 / 风险回报")
-
-add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
-          ["指标", "计算规则", "解读"],
-          [
-              ["NUPL 净未实现盈亏", "(市值 − 已实现市值) ÷ 市值",
-               ">0.75 极度贪婪；<0 全网浮亏（投降/大底）"],
-              ["SMM", "链上花费产出的动量", "反映抛压动能变化，捕捉筹码换手节奏"],
-              ["卖方衰竭", "波动率 × 长期持有者未实现亏损占比", "走高=抛售动能耗尽，常见于底部"],
-              ["风险回报", "历史价格分布的下行风险 vs 上行空间比值", "越低=当前介入性价比越高"],
-          ],
-          col_widths=[Inches(2.6), Inches(5.0), Inches(4.5)],
-          cell_size=12.5, header_size=13.5, row_h=Inches(0.68))
-
-tb, tf = textbox(s, Inches(0.6), Inches(6.25), Inches(12.1), Inches(0.6))
-p = tf.paragraphs[0]
-r = p.add_run()
-r.text = "链上数据来自 CryptoQuant，按日期对齐到 K 线；周线视图取每周最后一个值。"
-_set_font(r, 12, MUTE)
-
-# -- 资金流与情绪
-s = add_slide()
-add_title(s, "资金流与情绪：ETF / USDT.D / BTC.D / 资金费率")
-
-add_table(s, Inches(0.6), Inches(1.45), Inches(12.1),
-          ["指标", "计算规则", "解读"],
-          [
-              ["ETF 净流入", "现货 BTC ETF 每日净申赎（百万美元），周线求和",
-               "正=机构增持进场；持续净流出=需求转弱"],
-              ["USDT.D", "USDT 市值 ÷ 加密总市值（%）",
-               "升=资金避险（利空）；降=资金进场（利多）。与 BTC 常反向"],
-              ["BTC.D", "BTC 市值 ÷ 加密总市值（%）", "升=资金集中 BTC；降=流向山寨"],
-              ["资金费率", "永续合约多空平衡费率，每 8h 结算，取日均",
-               "正=多头拥挤；极端正值常预示回调"],
-          ],
-          col_widths=[Inches(2.3), Inches(5.3), Inches(4.5)],
-          cell_size=12.5, header_size=13.5, row_h=Inches(0.68))
-
-card(s, Inches(0.6), Inches(5.85), Inches(12.1), Inches(1.15),
-     "资金费率的特殊地位", BLUE,
-     ["它是 JLST 动态权重中噪声代理的组成部分（占 30% 权重）——费率越极端，模型越调低动量权重、调高反转权重。"])
+section_divider("05", "适用边界", "什么时候该用它、什么时候别用")
 
 # -- 适用场景
 s = add_slide()
@@ -858,9 +733,9 @@ card(s, Inches(0.5), Inches(5.7), Inches(12.2), Inches(1.15),
 
 
 # ═══════════════════════════════════════════════════════════
-# SECTION 07 · 局限与总结
+# SECTION 06 · 局限与总结
 # ═══════════════════════════════════════════════════════════
-section_divider("07", "局限与总结", "诚实面对模型的边界")
+section_divider("06", "局限与总结", "诚实面对模型的边界")
 
 # -- 注意事项
 s = add_slide()
@@ -909,10 +784,10 @@ card(s, Inches(6.75), Inches(1.5), Inches(5.85), Inches(2.5),
       "超额比原始信号提升 92%"])
 
 card(s, Inches(0.7), Inches(4.2), Inches(11.9), Inches(2.5),
-     "工具特色", BLUE,
-     ["每日自动更新数据 · 近 20 个技术/链上指标 + 信号标记",
-      "5 个可配置 MA 滤波条件 · 日线/周线 · 暗/亮主题 · 三图时间轴联动",
-      "把严谨的学术框架，变成你每天都能打开、看得懂、用得上的东西"])
+     "从论文到实操的完整链条", BLUE,
+     ["论文 → BTC 映射：把「跨股票横截面」改造成「跨时间尺度」，噪声代理换成资金费率",
+      "买卖点作用：三重 MA 滤波把逆势信号筛掉，做多超额 +9.82 个百分点、相对提升 92%",
+      "诚实边界：做空逆风、低频、参数近似——它是有学术支撑的方向判断，不是自动赚钱机器"])
 
 # ── 保存 ──
 out = Path(__file__).resolve().parent.parent / "BTC_Momentum_演示.pptx"
