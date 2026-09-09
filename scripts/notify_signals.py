@@ -25,7 +25,7 @@ from pathlib import Path
 SIGNAL_FILE = "btc_v2_daily.json"
 STATE_FILE = "last_alert.json"
 
-SITE_URL = "https://hhysteric.github.io/btc-momentum-pro/"
+SITE_URL = "https://btc-momentum.vercel.app/"
 
 BUTTONDOWN_API = "https://api.buttondown.com/v1/emails"
 
