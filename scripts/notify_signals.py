@@ -27,7 +27,7 @@ STATE_FILE = "last_alert.json"
 
 SITE_URL = "https://hhysteric.github.io/btc-momentum-pro/"
 
-BUTTONDOWN_API = "https://api.buttondown.email/v1/emails"
+BUTTONDOWN_API = "https://api.buttondown.com/v1/emails"
 
 TYPE_LABEL = {
     "long": "做多",
