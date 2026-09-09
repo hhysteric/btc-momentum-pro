@@ -442,6 +442,38 @@ tr:hover { background: rgba(56,58,60,0.3); }
     </table>
   </div>
 
+  <!-- 信号提醒订阅 -->
+  <div class="card" id="subscribeCard" style="margin-bottom:16px">
+    <div class="card-title">信号提醒订阅</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between">
+      <div style="flex:1 1 280px;min-width:240px">
+        <div style="font-size:14px;color:var(--fg);margin-bottom:4px">出现新的多 / 空信号时，邮件第一时间提醒你</div>
+        <div style="font-size:12px;color:var(--fg2)">每日自动检测，随时可退订。仅在产生新信号当天发送，不打扰。</div>
+      </div>
+      <!-- Buttondown 嵌入订阅表单：<USERNAME> 替换为实际 Buttondown 账号名 -->
+      <form
+        action="https://buttondown.com/api/emails/embed-subscribe/<USERNAME>"
+        method="post"
+        target="popupwindow"
+        onsubmit="window.open('https://buttondown.com/<USERNAME>', 'popupwindow')"
+        style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;flex:0 1 auto"
+      >
+        <input
+          type="email"
+          name="email"
+          required
+          placeholder="你的邮箱"
+          aria-label="邮箱地址"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--fg);padding:8px 12px;font-size:14px;font-family:var(--font);min-width:200px;outline:none"
+        />
+        <button
+          type="submit"
+          style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)"
+        >订阅提醒</button>
+      </form>
+    </div>
+  </div>
+
   <!-- 信号历史 -->
   <div class="table-wrap">
     <div class="table-header">

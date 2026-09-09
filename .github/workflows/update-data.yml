@@ -57,7 +57,13 @@ jobs:
       - name: Run JLST data pipeline
         run: python scripts/update_jlst.py
 
-      # 8. Commit & push
+      # 8. Email alert on new long/short signal (idempotent via data/last_alert.json)
+      - name: Notify on new signal
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: python scripts/notify_signals.py
+
+      # 9. Commit & push
       - name: Commit and push data
         run: |
           git config user.name "github-actions[bot]"
