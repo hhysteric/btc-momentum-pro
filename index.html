@@ -303,6 +303,16 @@ tr:hover { background: rgba(56,58,60,0.3); }
 .tv-toggle-btn { background: transparent; color: var(--fg2); cursor: pointer; transition: all 0.15s; }
 .tv-toggle-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 .tv-toggle-btn:hover { background: var(--bg4); }
+
+/* ── 多空方向筛选按钮 ── */
+.dir-btn {
+  background: transparent; color: var(--fg2); cursor: pointer;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; font-weight: 500;
+  transition: all 0.15s;
+}
+.dir-btn:hover { background: var(--bg4); }
+.dir-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 /* TV chart legend */
 .tv-legend { position: absolute; top: 8px; left: 12px; z-index: 10; font-family: var(--mono); font-size: 11px; line-height: 1.5; pointer-events: none; color: var(--fg2); }
 .tv-legend-symbol { font-weight: 600; font-size: 12px; color: var(--fg); margin-right: 12px; }
@@ -551,7 +561,12 @@ tr:hover { background: rgba(56,58,60,0.3); }
   <div class="table-wrap">
     <div class="table-header">
       <h3>📡 多信号买卖逻辑（JLST + MA 滤波）</h3>
-      <span style="display:flex;align-items:center;gap:10px">
+      <span style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="dirFilter" style="display:inline-flex;gap:4px">
+          <button type="button" class="dir-btn active" data-dir="all" onclick="setDirFilter('all')">全部</button>
+          <button type="button" class="dir-btn" data-dir="long" onclick="setDirFilter('long')">▲ 只看多</button>
+          <button type="button" class="dir-btn" data-dir="short" onclick="setDirFilter('short')">▼ 只看空</button>
+        </span>
         <span id="multiSigCount" style="font-size:12px;color:var(--fg2)"></span>
       </span>
     </div>
@@ -1438,6 +1453,16 @@ function updateSignalTable(data) {
 }
 
 // ── Multi-signal buy/sell table (user-configurable filters) ──
+// 多空方向筛选：'all' | 'long' | 'short'
+let currentDir = 'all';
+function setDirFilter(dir) {
+  currentDir = dir;
+  document.querySelectorAll('#dirFilter .dir-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.dir === dir);
+  });
+  applyMultiFilter();
+}
+
 function getMultiFilterState() {
   return {
     long: {
@@ -1479,13 +1504,17 @@ function applyMultiFilter() {
   if (!data) return;
   const allSignals = data.signals_history || [];
   const filters = getMultiFilterState();
-  const signals = filterMultiSignals(allSignals, filters);
+  let signals = filterMultiSignals(allSignals, filters);
+
+  // 方向筛选（叠加在 MA 滤波之上）
+  if (currentDir !== 'all') signals = signals.filter(s => s.type === currentDir);
 
   // Count active filters for label
   const activeCount = Object.values(filters.long).filter(Boolean).length + Object.values(filters.short).filter(Boolean).length;
+  const dirLabel = currentDir === 'long' ? '（仅做多）' : currentDir === 'short' ? '（仅做空）' : '';
   const label = activeCount > 0
-    ? `${signals.length} / ${allSignals.length} 个信号（${activeCount} 个滤波条件）`
-    : `${allSignals.length} 个信号（无 MA 滤波）`;
+    ? `${signals.length} / ${allSignals.length} 个信号（${activeCount} 个滤波条件）${dirLabel}`
+    : `${signals.length} / ${allSignals.length} 个信号（无 MA 滤波）${dirLabel}`;
   document.getElementById('multiSigCount').textContent = label;
 
   renderMultiTable(signals);
