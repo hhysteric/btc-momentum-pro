@@ -58,7 +58,9 @@ jobs:
         run: python scripts/update_jlst.py
 
       # 8. Email alert on new long/short signal (idempotent via data/last_alert.json)
+      #    发信是附加功能，失败不应阻断核心的数据更新/提交流程。
       - name: Notify on new signal
+        continue-on-error: true
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python scripts/notify_signals.py

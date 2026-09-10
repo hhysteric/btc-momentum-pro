@@ -122,6 +122,10 @@ def send_broadcast(subject, body, api_key):
         headers={
             "Authorization": f"Token {api_key}",
             "Content-Type": "application/json",
+            # Buttondown 要求：用 about_to_send 状态首次群发时，必须带此确认头
+            # （每个 key 仅首次强制，但每次都带无副作用）。缺失会返回
+            # 400 sending_requires_confirmation。
+            "X-Buttondown-Live-Dangerously": "true",
         },
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
