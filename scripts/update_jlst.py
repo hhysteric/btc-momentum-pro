@@ -154,6 +154,13 @@ def fetch_binance_klines(symbol: str, interval: str, limit: int = 1000) -> list:
 
         time.sleep(0.3)  # rate limit courtesy
 
+    # 剔除尚未收盘的最后一根 K 线：Binance 会返回当前正在进行、还没收盘的
+    # K 线，其 close 是实时浮动价。若纳入计算，信号会随实时价漂移、事后移位
+    # 或消失（repaint）——回测与实盘不一致的严重问题。用每根 K 线自带的
+    # closeTime（数组索引 6）判断：只保留 closeTime 已过去（已收盘）的 K 线。
+    now_ms = time.time() * 1000
+    all_data = [k for k in all_data if int(k[6]) < now_ms]
+
     return all_data
 
 
