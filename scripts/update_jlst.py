@@ -30,7 +30,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -264,6 +264,46 @@ def merge_data(csv_data: dict, binance_data: dict) -> dict:
         merged[key] = [merged[key][i] for i in indices]
     merged["n"] = len(merged["ts"])
     return merged
+
+
+def _period_end_ms(ts_open_ms: int, interval: str) -> int:
+    """给定 K 线周期起点（ms）与周期类型，返回该周期的结束时刻（ms）。"""
+    dt = datetime.fromtimestamp(ts_open_ms / 1000, tz=timezone.utc)
+    if interval == "1d":
+        end = dt + timedelta(days=1)
+    elif interval == "1w":
+        end = dt + timedelta(days=7)
+    elif interval == "1M":
+        # 按自然月推进，避免固定 30 天误差
+        if dt.month == 12:
+            end = dt.replace(year=dt.year + 1, month=1)
+        else:
+            end = dt.replace(month=dt.month + 1)
+    else:
+        # 未知周期：保守起见按 1 天处理
+        end = dt + timedelta(days=1)
+    return int(end.timestamp() * 1000)
+
+
+def drop_unclosed(data: dict, interval: str) -> dict:
+    """剔除末尾尚未收盘的 K 线（无论来自 Binance 还是 CSV）。
+
+    问题：Binance 会返回当前正在进行、还没收盘的 K 线；历史 CSV 也可能被
+    盘中脚本追加进未收盘的当日行。若纳入计算，信号会随实时价漂移、事后移位
+    或消失（repaint）；且 CSV 成交量口径与 Binance 不同，回退用 CSV 时还会
+    出现离谱的成交量。这里对最终 data（merge 之后）统一处理：只要末根 K 线
+    所属周期的结束时刻还没到（> 当前 UTC），就判定未收盘并剔除，循环直到
+    末根是已收盘周期。
+    """
+    now_ms = time.time() * 1000
+    n = data.get("n", len(data["ts"]))
+    while n > 0 and _period_end_ms(data["ts"][n - 1], interval) > now_ms:
+        for key in ("ts", "open", "high", "low", "close", "volume"):
+            if key in data and len(data[key]) == n:
+                data[key].pop()
+        n -= 1
+    data["n"] = n
+    return data
 
 
 def fetch_funding_rate(symbol: str = "BTCUSDT") -> list:
@@ -1350,6 +1390,13 @@ def main():
             data = merge_data(csv_data, data)
             print(f"  Merged: {data['n']} total candles")
 
+        # 剔除未收盘的末尾 K 线（无论来自 Binance 还是 CSV），避免 repaint
+        before = data["n"]
+        data = drop_unclosed(data, params["interval"])
+        if data["n"] < before:
+            print(f"  Dropped {before - data['n']} unclosed candle(s); last closed = "
+                  f"{datetime.fromtimestamp(data['ts'][-1]/1000, tz=timezone.utc).date()}")
+
         # Compute indicators
         print(f"  Computing JLST indicators...")
         result = compute_jlst(data, params)
@@ -1427,6 +1474,9 @@ def main():
 
         if tf_name == "daily" and csv_data is not None:
             data = merge_data(csv_data, data)
+
+        # 剔除未收盘的末尾 K 线（与 v1 一致），避免 repaint
+        data = drop_unclosed(data, params["interval"])
 
         # Build v2 params for this timeframe
         if v2_base_params and tf_name == "daily":
