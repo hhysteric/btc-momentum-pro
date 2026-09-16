@@ -243,7 +243,12 @@ def merge_data(csv_data: dict, binance_data: dict) -> dict:
         merged["high"].append(csv_data["high"][i])
         merged["low"].append(csv_data["low"][i])
         merged["close"].append(csv_data["close"][i])
-        merged["volume"].append(csv_data["volume"][i])
+        # CSV 成交量列是 CoinMarketCap 的美元成交额，量级/口径与 Binance 的
+        # BTC 成交量完全不同（交界日跳变数百倍），二者无法拼接换算。故 CSV 段
+        # （Binance 未覆盖的早期日期）成交量置空——K 线图只在 Binance 真实
+        # 成交量那段（2017-08 至今）显示柱子，避免早期出现口径错误的巨量柱。
+        # OHLC 价格仍保留 CSV 值（价格是对的，只有成交量口径有问题）。
+        merged["volume"].append(None)
 
     # Then: add all Binance rows
     for i in range(binance_data["n"]):
