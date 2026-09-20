@@ -62,6 +62,12 @@ const DataModule = {
             const byDay = new Map();
             for (let i = 0; i < this.processedData.length; i++) {
                 const r = this.processedData[i];
+                // CSV 的成交量是另一家数据商的美元成交额，与 Binance 的 BTC 成交量
+                // 口径完全不同、不可混用。这里先全部清空，只保留 Binance
+                // (btc_daily.json) 提供的真实成交量——凡 Binance 未覆盖的日期
+                // （2017-08 之前的早期、以及超出 json 范围的尾部），成交量保持为
+                // null（不显示成交量柱），避免口径错乱导致的巨量柱。
+                r.volume = null;
                 byDay.set(r.date.toISOString().slice(0, 10), r);
             }
 
@@ -73,11 +79,14 @@ const DataModule = {
                 const h = d.high && d.high[i] != null ? d.high[i] : d.close[i];
                 const l = d.low && d.low[i] != null ? d.low[i] : d.close[i];
                 const c = d.close[i];
-                const vol = d.volume && d.volume[i] != null ? d.volume[i] : null;
+                // btc_daily.json 是权威源：其 volume 即使是 null（Binance 未覆盖的
+                // 2017-08 之前，成交量口径不可用）也必须覆盖 CSV 的旧值——否则 CSV
+                // 的美元成交额成交量会残留下来，导致 K 线图早期出现巨量柱。
+                const vol = (d.volume && d.volume[i] != null) ? d.volume[i] : null;
                 const existing = byDay.get(key);
                 if (existing) {
                     existing.open = o; existing.high = h; existing.low = l; existing.close = c;
-                    if (vol != null) existing.volume = vol;
+                    existing.volume = vol;
                 } else {
                     const row = { date: dt, open: o, high: h, low: l, close: c, volume: vol };
                     byDay.set(key, row);
@@ -488,13 +497,15 @@ const DataModule = {
             weekStart.setDate(dt.getDate() - diff);
             const key = weekStart.toISOString().slice(0, 10);
             if (!weeks.has(key)) {
-                weeks.set(key, { date: new Date(key), open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume });
+                weeks.set(key, { date: new Date(key), open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume != null ? d.volume : null });
             } else {
                 const w = weeks.get(key);
                 w.high = Math.max(w.high, d.high);
                 w.low = Math.min(w.low, d.low);
                 w.close = d.close;
-                w.volume += d.volume;
+                // 跳过 null（成交量缺失日），避免 null 参与加法被当成 0 产生脏值；
+                // 整周都缺失则保持 null（该周不显示成交量柱）。
+                if (d.volume != null) w.volume = (w.volume != null ? w.volume : 0) + d.volume;
             }
         }
         return Array.from(weeks.values()).sort((a, b) => a.date - b.date);

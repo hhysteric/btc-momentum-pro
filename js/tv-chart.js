@@ -86,6 +86,14 @@ const TvChartModule = {
             }
         }
         this.chart.timeScale().fitContent();
+        // 周期切换后，成交量/ETF 等独立刻度必须重新自适应——否则日线量（几千~几万）
+        // 与周线量（几十万~百万）相差约 30 倍，共用固定刻度会让柱高在切换时剧烈跳变
+        // （周线顶天、日线被压平）。重新应用 autoScale 让刻度按当前周期的量级重算。
+        for (const sid of ['vol', 'etf']) {
+            if (this.chart.priceScale(sid)) {
+                this.chart.priceScale(sid).applyOptions({ autoScale: true });
+            }
+        }
         this._updateTimeframeButtons();
         // 刷新 legend 显示最新 bar
         this._showLegendForBar(this._getLastBar());
@@ -283,7 +291,10 @@ const TvChartModule = {
                 return weekly ? this._toWeekly(raw) : raw;
             }
             case 'volume': {
-                return data.map(d => ({ time: this._toDay(d.date), value: d.volume }));
+                // 跳过 null（Binance 未覆盖的早期无有效成交量），避免画出 0 或异常柱
+                return data
+                    .filter(d => d.volume != null)
+                    .map(d => ({ time: this._toDay(d.date), value: d.volume }));
             }
             case 'rsi': {
                 const rsi = DataModule.calculateRSI(data);
