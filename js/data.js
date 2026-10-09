@@ -486,18 +486,19 @@ const DataModule = {
         };
     },
 
-    // 把日线聚合成周线（以周一为起点）
+    // 把日线聚合成周线（以周一为起点，UTC）
+    // 末尾那一周若尚未走完（今天还没到该周周日 23:59 UTC），会带上 partial: true，
+    // 供图表用「浅色/虚线」区分「本周进行中」，避免看起来像数据卡住不动。
     aggregateWeekly(data) {
         const weeks = new Map();
         for (const d of data) {
             const dt = new Date(d.date);
-            const day = dt.getDay();
+            const day = dt.getUTCDay();
             const diff = (day === 0 ? 6 : day - 1); // 周一为一周起点
-            const weekStart = new Date(dt);
-            weekStart.setDate(dt.getDate() - diff);
+            const weekStart = new Date(dt.getTime() - diff * 86400000);
             const key = weekStart.toISOString().slice(0, 10);
             if (!weeks.has(key)) {
-                weeks.set(key, { date: new Date(key), open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume != null ? d.volume : null });
+                weeks.set(key, { date: new Date(key), open: d.open, high: d.high, low: d.low, close: d.close, volume: d.volume != null ? d.volume : null, partial: false });
             } else {
                 const w = weeks.get(key);
                 w.high = Math.max(w.high, d.high);
@@ -508,7 +509,22 @@ const DataModule = {
                 if (d.volume != null) w.volume = (w.volume != null ? w.volume : 0) + d.volume;
             }
         }
-        return Array.from(weeks.values()).sort((a, b) => a.date - b.date);
+        const out = Array.from(weeks.values()).sort((a, b) => a.date - b.date);
+        // 标记进行中的当周：与「最新一根已收盘 K 线」同属一周即为未走完。
+        this._markPartialWeek(out);
+        return out;
+    },
+
+    // 判断最后一根周线是否属于「尚未收盘的当周」。
+    // 规则：取数据最后一根日线的所属周作为当前周；只有当该周就是最后一周时才是 partial。
+    // 注意不能用「真实今天」判断——回测/历史数据截止日早于今天时，最后一周其实早已收盘。
+    _markPartialWeek(weeks) {
+        if (!weeks.length) return;
+        const last = weeks[weeks.length - 1];
+        // 该周周日的 23:59:59.999 UTC（周一起点 + 6 天）
+        const weekEnd = new Date(last.date.getTime() + 6 * 86400000 + 86399999);
+        const now = new Date();
+        if (now.getTime() < weekEnd.getTime()) last.partial = true;
     },
 
     calculateRSI(data, period = 14) {

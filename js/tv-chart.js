@@ -15,6 +15,7 @@ const TvChartModule = {
     _container: null,
     _timeframe: 'daily',   // 'daily' | 'weekly'
     _logScale: false,
+    _partialTime: null,    // 周线下「本周进行中」那根 K 线的日期 key（'YYYY-MM-DD'），无则为 null
 
     // ─── 指标定义 ───────────────────────────────────────────────
     INDICATORS: {
@@ -191,10 +192,13 @@ const TvChartModule = {
     // ─── 直方图着色 ──────────────────────────────────────────────
     _colorizeIfNeeded(key, data) {
         if (key === 'volume') {
+            // 用日期 key 对齐而非下标：成交量数据会先剔除 null（Binance 未覆盖的早期），
+            // 下标对齐会让着色整体错位。按 time 查表则无论过滤多少根都不受影响。
             const src = this._getSourceData();
-            return data.map((d, i) => ({
+            const upByTime = new Map(src.map(d => [this._toDay(d.date), d.close >= d.open]));
+            return data.map(d => ({
                 ...d,
-                color: (src[i] && src[i].close >= src[i].open) ? 'rgba(0,211,149,0.25)' : 'rgba(255,71,87,0.25)',
+                color: upByTime.get(d.time) ? 'rgba(0,211,149,0.25)' : 'rgba(255,71,87,0.25)',
             }));
         }
         if (key === 'etf') {
@@ -215,10 +219,26 @@ const TvChartModule = {
 
     _getOHLC() {
         const data = this._getSourceData();
-        return data.map(d => ({
-            time: this._toDay(d.date),
-            open: d.open, high: d.high, low: d.low, close: d.close,
-        }));
+        const isWeekly = this._timeframe === 'weekly';
+        let partialTime = null;
+        const out = data.map(d => {
+            const bar = {
+                time: this._toDay(d.date),
+                open: d.open, high: d.high, low: d.low, close: d.close,
+            };
+            // 周线里「本周进行中」的那根用半透明浅色渲染，与已收盘周区分开：
+            // 用户一眼能看出数据是活的、只是当周还没走完，而非停更。
+            if (isWeekly && d.partial) {
+                partialTime = bar.time;
+                const up = d.close >= d.open;
+                bar.color = up ? 'rgba(0,211,149,0.30)' : 'rgba(255,71,87,0.30)';
+                bar.borderColor = up ? 'rgba(0,211,149,0.70)' : 'rgba(255,71,87,0.70)';
+                bar.wickColor = bar.borderColor;
+            }
+            return bar;
+        });
+        this._partialTime = partialTime;
+        return out;
     },
 
     /**
@@ -362,7 +382,7 @@ const TvChartModule = {
                 return;
             }
             const bar = param.seriesData.get(this.candleSeries);
-            this._showLegendForBar(bar);
+            this._showLegendForBar(bar, param.time);
         });
         // 初始显示最新 bar
         this._showLegendForBar(this._getLastBar());
@@ -372,10 +392,10 @@ const TvChartModule = {
         const ohlc = this._getOHLC();
         if (!ohlc.length) return null;
         const last = ohlc[ohlc.length - 1];
-        return { open: last.open, high: last.high, low: last.low, close: last.close };
+        return { time: last.time, open: last.open, high: last.high, low: last.low, close: last.close };
     },
 
-    _showLegendForBar(bar) {
+    _showLegendForBar(bar, time) {
         const legend = document.getElementById('tv-legend');
         if (!legend || !bar) return;
         const chg = ((bar.close - bar.open) / bar.open * 100);
@@ -389,6 +409,26 @@ const TvChartModule = {
         const chgEl = legend.querySelector('.tv-legend-chg');
         chgEl.textContent = `${sign}${chg.toFixed(2)}%`;
         chgEl.style.color = color;
+
+        // 周线下，悬浮到（或默认显示的正是）「本周进行中」那根时，亮出提示徽章
+        const liveEl = legend.querySelector('.tv-legend-live');
+        if (liveEl) {
+            const t = this._timeKey(time != null ? time : bar.time);
+            const show = this._timeframe === 'weekly' && t != null && t === this._partialTime;
+            liveEl.style.display = show ? '' : 'none';
+        }
+    },
+
+    // 统一时间 key：crosshair 的 param.time 可能是 'YYYY-MM-DD' 字符串、
+    // BusinessDay 对象 {year,month,day} 或时间戳，这里都归一成 'YYYY-MM-DD'
+    _timeKey(t) {
+        if (t == null) return null;
+        if (typeof t === 'string') return t;
+        if (typeof t === 'object' && t.year != null) {
+            return `${t.year}-${String(t.month).padStart(2, '0')}-${String(t.day).padStart(2, '0')}`;
+        }
+        if (typeof t === 'number') return new Date(t * 1000).toISOString().slice(0, 10);
+        return String(t);
     },
 
     _fmtPrice(v) {

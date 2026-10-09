@@ -318,12 +318,13 @@ tr:hover { background: rgba(56,58,60,0.3); }
 .tv-legend-symbol { font-weight: 600; font-size: 12px; color: var(--fg); margin-right: 12px; }
 .tv-legend-o, .tv-legend-h, .tv-legend-l, .tv-legend-c { margin-right: 10px; }
 .tv-legend-chg { font-weight: 600; }
+.tv-legend-live { display: none; margin-left: 10px; padding: 1px 8px; border: 1px dashed #f59e0b; border-radius: 4px; color: #f59e0b; font-weight: 500; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<script src="js/data.js?v=3"></script>
+<script src="js/data.js?v=4"></script>
 <script src="js/smm.js"></script>
-<script src="js/tv-chart.js?v=7"></script>
+<script src="js/tv-chart.js?v=8"></script>
 </head>
 <body>
 
@@ -545,6 +546,7 @@ tr:hover { background: rgba(56,58,60,0.3); }
     <div style="position:relative">
       <div id="tv-legend" class="tv-legend">
         <span class="tv-legend-symbol">BTC/USD</span>
+        <span class="tv-legend-live">本周进行中</span>
         <span class="tv-legend-o">O: --</span>
         <span class="tv-legend-h">H: --</span>
         <span class="tv-legend-l">L: --</span>
