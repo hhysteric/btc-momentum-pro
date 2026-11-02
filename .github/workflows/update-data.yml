@@ -99,6 +99,9 @@ jobs:
           python - <<'PY'
           import datetime, sys
           today = datetime.datetime.now(datetime.timezone.utc).date()
+          # RP 的兜底源 bitcoin-data.com 本身有 ~6 天发布延迟（前端会用 price/mvrv
+          # 反推缺失日，图线不中断），阈值放宽到 10；MVRV/NUPL 无此延迟，5 天。
+          LIMITS = {"MVRV": 5, "Realized Price": 10, "NUPL": 5}
           def newest_valid(path):
               with open(path, encoding="utf-8-sig") as f:
                   for line in f:
@@ -118,8 +121,8 @@ jobs:
                   bad.append(f"{name}: no usable records")
                   continue
               stale = (today - last).days
-              print(f"{name}: last={last}  stale_days={stale}")
-              if stale > 5:
+              print(f"{name}: last={last}  stale_days={stale} (limit {LIMITS[name]})")
+              if stale > LIMITS[name]:
                   bad.append(f"{name} feed is {stale} days stale (last {last})")
           if bad:
               sys.exit("; ".join(bad))
