@@ -74,10 +74,11 @@ jobs:
           git diff --staged --quiet || git commit -m "data: auto-update $(date -u +%Y-%m-%d)"
           git push
 
-      # 10. Guard LAST, after the data has landed. The funding fetch degrades
-      #     gracefully (a feed outage must not block price/signal updates), which
-      #     is how a geo-blocked endpoint went unnoticed for 12 days. Fail the
-      #     run here so the red X surfaces it — without withholding the data.
+      # 10. Guard LAST, after the data has landed. The funding & on-chain fetches
+      #     degrade gracefully (a feed outage must not block price/signal updates),
+      #     which is how a geo-blocked endpoint went unnoticed for 12 days and a
+      #     missing CRYPTOQUANT_KEY froze MVRV/RP/NUPL for ~2 months. Fail the run
+      #     here so the red X surfaces it — without withholding the data.
       - name: Verify funding rate feed is fresh
         if: always()
         run: |
@@ -90,4 +91,36 @@ jobs:
               sys.exit("funding feed has no usable records at all")
           if stale > 3:
               sys.exit(f"funding feed is {stale:.1f} days stale - check the endpoint")
+          PY
+
+      - name: Verify on-chain feed is fresh
+        if: always()
+        run: |
+          python - <<'PY'
+          import datetime, sys
+          today = datetime.datetime.now(datetime.timezone.utc).date()
+          def newest_valid(path):
+              with open(path, encoding="utf-8-sig") as f:
+                  for line in f:
+                      line = line.strip()
+                      if not line or line.startswith("Datetime"):
+                          continue
+                      cols = line.split(",")
+                      if len(cols) >= 2 and cols[1].strip():
+                          return datetime.date.fromisoformat(cols[0][:10])
+              return None
+          bad = []
+          for name, path in [("MVRV", "data/mvrv.csv"),
+                             ("Realized Price", "data/realized_price.csv"),
+                             ("NUPL", "data/nupl.csv")]:
+              last = newest_valid(path)
+              if last is None:
+                  bad.append(f"{name}: no usable records")
+                  continue
+              stale = (today - last).days
+              print(f"{name}: last={last}  stale_days={stale}")
+              if stale > 5:
+                  bad.append(f"{name} feed is {stale} days stale (last {last})")
+          if bad:
+              sys.exit("; ".join(bad))
           PY
