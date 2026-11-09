@@ -3,21 +3,24 @@
 
 数据源优先级：
   1. CryptoQuant API（需要 CRYPTOQUANT_KEY Secret；key 撤销/过期时自动降级）
-  2. bitcoin-data.com（免费、无需 key；限流 10 请求/小时，本脚本一次跑只需 3 个）
+  2. btc-signal-pro 的 data/ CSV（其 CI 持有 CRYPTOQUANT_KEY 每日更新，格式与本
+     仓库完全一致；raw.githubusercontent.com 免 key 拉取）
+  3. bitcoin-data.com（免费、无需 key；限流 10 请求/小时，本脚本一次跑只需 3 个；
+     2026-11 上旬曾断更一周——上游自身停更，不能作唯一兜底）
 
-MVRV/RP/NUPL 在 bitcoin-data.com 全部有端点（值与 CryptoQuant 有 ~1% 方法差
-异，拼接处会有轻微台阶，对趋势/阈值类分析无影响）。输出保持原格式：逗号分隔、
-降序、最新在最上、日期形如 2026-07-15T00:00:00Z。幂等：重复运行不会重复写入
-已有日期。
+MVRV/RP/NUPL 三个源都有（值与 CryptoQuant 有 ~1% 方法差异，拼接处会有轻微台阶，
+对趋势/阈值类分析无影响）。输出保持原格式：逗号分隔、降序、最新在最上、日期形如
+2026-07-15T00:00:00Z。幂等：重复运行不会重复写入已有日期。
 
 CryptoQuant API key 从环境变量 CRYPTOQUANT_KEY 读取（GitHub Actions 里配为 Secret）。
 **绝不硬编码 key**：前端源码公开，key 只能存在于服务端 Actions 环境。
 
 用法:
-    # 优先用 CryptoQuant；缺 key 或请求失败时自动回退到 bitcoin-data.com
+    # 按 cryptoquant → btc-signal-pro → bitcoin-data.com 顺序取第一个有新数据的源
     python scripts/update_onchain.py
     # 强制使用某个源（调试用）
     SOURCE=cryptoquant    python scripts/update_onchain.py
+    SOURCE=signal-repo    python scripts/update_onchain.py
     SOURCE=bitcoin-data   python scripts/update_onchain.py
 """
 import datetime
@@ -30,6 +33,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
 CRYPTOQUANT_API = "https://api.cryptoquant.com/v1"
 BITCOIN_DATA_API = "https://bitcoin-data.com/v1"
+SIGNAL_REPO_RAW = "https://raw.githubusercontent.com/hhysteric/btc-signal-pro/main/data"
 
 # 每个指标：本地文件、表头、CryptoQuant endpoint+字段、bitcoin-data.com 路径+字段
 SERIES = [
@@ -84,6 +88,33 @@ def fetch_cryptoquant(endpoint, field, key, start_date, today):
         v = item.get(field)
         if d and v is not None:
             out[d[:10]] = v
+    return out
+
+
+def fetch_signal_repo(filename, start_date, today):
+    """btc-signal-pro 的 data/ CSV：其 CI 持有 CRYPTOQUANT_KEY 每日更新，格式与本
+    仓库完全一致（同表头、降序、T00:00:00Z 日期）。作为第二兜底——本仓库缺 key、
+    bitcoin-data.com 也断更时仍能拿到 CryptoQuant 口径的值。
+
+    注意这是跨 repo 依赖：signal-pro 的 CI 若停更，这里同样拿不到新数据（由
+    兜底链末端的 bitcoin-data.com 与 workflow 的 staleness guard 兜住）。"""
+    url = f"{SIGNAL_REPO_RAW}/{filename}"
+    raw = _http_get(url, headers={"User-Agent": "btc-cycle-dashboard/1.0"})
+    out = {}
+    for line in raw.decode("utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("Datetime"):
+            continue
+        cols = line.split(",")
+        if len(cols) < 2 or not cols[1].strip():
+            continue
+        d = cols[0][:10]
+        try:
+            dt = datetime.date.fromisoformat(d)
+        except ValueError:
+            continue
+        if start_date <= dt <= today:
+            out[d] = cols[1].strip()
     return out
 
 
@@ -161,11 +192,14 @@ def update_one(series, cq_key, today, force_source=None):
 
     start = newest + datetime.timedelta(days=1)
 
-    # 源顺序：cryptoquant（可用时）→ bitcoin-data.com 兜底
+    # 源顺序：cryptoquant（可用时）→ btc-signal-pro → bitcoin-data.com
     sources = []
     if cq_key or force_source == "cryptoquant":
         sources.append(("cryptoquant", lambda s, t: fetch_cryptoquant(
             series["cq_endpoint"], series["cq_field"], cq_key, s, t)))
+    if force_source in (None, "signal-repo"):
+        sources.append(("btc-signal-pro", lambda s, t: fetch_signal_repo(
+            series["file"], s, t)))
     if force_source in (None, "bitcoin-data"):
         sources.append(("bitcoin-data.com", lambda s, t: fetch_bitcoin_data(
             series["bd_path"], series["bd_field"], s, t)))
@@ -192,8 +226,8 @@ def update_one(series, cq_key, today, force_source=None):
 def main():
     cq_key = os.environ.get("CRYPTOQUANT_KEY", "").strip()
     force = os.environ.get("SOURCE", "").strip().lower() or None
-    if force and force not in ("cryptoquant", "bitcoin-data"):
-        print(f"未知 SOURCE={force!r}，期望 cryptoquant|bitcoin-data")
+    if force and force not in ("cryptoquant", "signal-repo", "bitcoin-data"):
+        print(f"未知 SOURCE={force!r}，期望 cryptoquant|signal-repo|bitcoin-data")
         return 1
 
     today = datetime.datetime.now(datetime.timezone.utc).date()
@@ -201,7 +235,7 @@ def main():
     if cq_key:
         print("检测到 CRYPTOQUANT_KEY，优先使用 CryptoQuant")
     else:
-        print("未设置 CRYPTOQUANT_KEY，使用 bitcoin-data.com 免费源")
+        print("未设置 CRYPTOQUANT_KEY，兜底顺序: btc-signal-pro → bitcoin-data.com")
 
     changed = False
     for series in SERIES:

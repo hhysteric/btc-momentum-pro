@@ -686,31 +686,78 @@ const DataModule = {
         return this._mvrvBands;
     },
 
-    // 最新 MVRV 值 + 落在哪个 band 区间（用当日的 band 系数判断）
+    // ===== 链上数据滞后检测 =====
+    // 链上源（CryptoQuant / bitcoin-data.com）可能比日线价格晚数天，甚至完全断供。
+    // 指标分析若直接拿「最后一条链上记录」当"当前值"，会把几天前的 MVRV 当作今天
+    // 的估值下结论。这里统一给出滞后天数，调用方据此回退到「价格 ÷ MVRV」反推，
+    // 并在文案里标注数据截止日。
+    //   返回 { lastOnchain, lastPrice, lagDays, stale }；无数据返回 null。
+    //   stale=true 表示链上数据明显滞后（>3 天），估值类结论应以派生值为准。
+    ONCHAIN_LAG_TOLERANCE: 3,   // 天
+
+    getOnchainFreshness() {
+        if (!this.onchainData.length || !this.processedData.length) return null;
+        const lastOnchain = this.onchainData[this.onchainData.length - 1].date;
+        const lastPrice = this.processedData[this.processedData.length - 1].date;
+        const lagDays = Math.round((lastPrice - lastOnchain) / 86400000);
+        return {
+            lastOnchain,
+            lastPrice,
+            lagDays: Math.max(0, lagDays),
+            stale: lagDays > this.ONCHAIN_LAG_TOLERANCE,
+        };
+    },
+
+    // 当前 MVRV（含滞后感知）：链上数据新鲜时用 CSV 的 MVRV；滞后时改用
+    // 当日价格 / 当日已实现价格反推（已实现价格在滞后超过一个季度时视为失效）。
+    //   返回 { mvrv, realizedPrice, date, source: 'onchain'|'derived', freshness }
     getMvrvCurrent() {
         if (!this.onchainData.length) return null;
+        const fresh = this.getOnchainFreshness();
+        const latest = this.getLatest();
+        const onchainLatest = this.onchainData[this.onchainData.length - 1];
+
+        // 链上新鲜 → 原逻辑（band 区间 + CSV 值）
+        if (!fresh || !fresh.stale) {
+            const bandInfo = this.getMvrvBands();
+            if (!bandInfo) return null;
+            const i = this.onchainData.length - 1;
+            const cur = bandInfo.series[i];
+            return {
+                date: onchainLatest.date, mvrv: onchainLatest.mvrv,
+                realizedPrice: onchainLatest.realizedPrice, zone: this._mvrvZone(cur.coef, onchainLatest.mvrv),
+                mean: cur.mean, sd: cur.sd, coef: cur.coef, nupl: onchainLatest.nupl,
+                source: 'onchain', freshness: fresh,
+            };
+        }
+
+        // 链上滞后 → 反推：realized = price / onchain_mvrv，则当日 mvrv = 当日价 / realized。
+        // realized 取最后一条链上记录的已实现价格（即链上成本线，短期内基本平稳）。
+        const rp = onchainLatest.realizedPrice;
+        if (!latest || !rp) return null;
+        const mvrv = latest.close / rp;
         const bandInfo = this.getMvrvBands();
-        if (!bandInfo) return null;
-        const i = this.onchainData.length - 1;
-        const latest = this.onchainData[i];
-        const cur = bandInfo.series[i];              // 当日 band 系数
-        const defs = bandInfo.defs;                  // 高→低
+        const cur = bandInfo ? bandInfo.series[bandInfo.series.length - 1] : null;
+        return {
+            date: latest.date, mvrv,
+            realizedPrice: rp, zone: cur ? this._mvrvZone(cur.coef, mvrv) : '',
+            mean: cur ? cur.mean : null, sd: cur ? cur.sd : null, coef: cur ? cur.coef : null,
+            nupl: null, source: 'derived', freshness: fresh,
+        };
+    },
+
+    // MVRV 落在哪个 band
+    _mvrvZone(coef, mvrv) {
+        if (!coef) return '';
+        const defs = this.MVRV_BAND_DEFS;          // 高→低
         const top = defs[0], bottom = defs[defs.length - 1];
-        let zone = `低于 ${bottom.key}`;
-        if (latest.mvrv >= cur.coef[top.key]) zone = `高于 ${top.key}`;
-        else {
-            for (let j = 0; j < defs.length - 1; j++) {
-                if (latest.mvrv < cur.coef[defs[j].key] && latest.mvrv >= cur.coef[defs[j + 1].key]) {
-                    zone = `${defs[j + 1].key} ~ ${defs[j].key} 之间`;
-                    break;
-                }
+        if (mvrv >= coef[top.key]) return `高于 ${top.key}`;
+        for (let j = 0; j < defs.length - 1; j++) {
+            if (mvrv < coef[defs[j].key] && mvrv >= coef[defs[j + 1].key]) {
+                return `${defs[j + 1].key} ~ ${defs[j].key} 之间`;
             }
         }
-        return {
-            date: latest.date, mvrv: latest.mvrv, realizedPrice: latest.realizedPrice, zone,
-            mean: cur.mean, sd: cur.sd, coef: cur.coef,
-            nupl: latest.nupl,
-        };
+        return `低于 ${bottom.key}`;
     },
 
     // 当前 NUPL（最新一条）
@@ -783,6 +830,15 @@ const DataModule = {
         return null;
     },
 
+    // 链上指标滞后说明文案：stale 时生成「（链上数据截至 X，比价格晚 N 天，估值按当日价/成本线折算）」
+    _staleNote(freshness, derived) {
+        if (!freshness || !freshness.stale) return '';
+        const d = freshness.lastOnchain;
+        const dateStr = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+        if (derived) return `（链上源自 ${dateStr} 起未更新、落后价格 ${freshness.lagDays} 天；已按当日价格/成本线折算）`;
+        return `（链上数据截至 ${dateStr}，比价格晚 ${freshness.lagDays} 天）`;
+    },
+
     // ===== 底部研判共享上下文 =====
     // 汇总「历史各轮周期底部」的链上特征（价格/已实现价格比、MVRV、NUPL），供多个指标分析复用，
     // 据此给出「若历史规律重演」的底部价位区间。历轮底部经数据核对：
@@ -809,7 +865,7 @@ const DataModule = {
         const bottomLow = realized * prMin;
         const bottomHigh = realized * prMax;
         return {
-            price, realized,
+            price, realized, freshness: mvrvCur.freshness,
             priceToRealized: price / realized,
             mvrv: mvrvCur.mvrv,
             nupl: mvrvCur.nupl,
@@ -1091,7 +1147,7 @@ const DataModule = {
         const bt = this.HISTORICAL_BOTTOMS;
         const mvLo = Math.min(...bt.map(x => x.mvrv)), mvHi = Math.max(...bt.map(x => x.mvrv));
         const btPriceLo = mvLo * cur.realizedPrice, btPriceHi = mvHi * cur.realizedPrice;
-        const head = `当前 MVRV = ${cur.mvrv.toFixed(2)}，历史周期底部 MVRV 约 ${mvLo.toFixed(2)}–${mvHi.toFixed(2)}。`;
+        const head = `当前 MVRV = ${cur.mvrv.toFixed(2)}，历史周期底部 MVRV 约 ${mvLo.toFixed(2)}–${mvHi.toFixed(2)}。${this._staleNote(cur.freshness, cur.source === 'derived')}`;
         let tail;
         if (cur.mvrv >= topCoef) tail = `MVRV 已触及 +2.0sd 过热带，历史上对应周期顶部风险，链上浮盈丰厚、抛压易积累。`;
         else if (cur.mvrv <= mvHi) tail = `MVRV=${cur.mvrv.toFixed(2)} 已进入历史底部区间，全市场平均接近或处于亏损，是周期价值区，但磨底可能持续。`;
@@ -1105,7 +1161,7 @@ const DataModule = {
         if (!ctx) return null;
         const bt = ctx.bottoms;
         const ratios = bt.map(x => x.pr.toFixed(2)).join(' / ');
-        let text = `当前 BTC 价格 $${Math.round(ctx.price).toLocaleString()}，已实现价格 $${Math.round(ctx.realized).toLocaleString()}，价格/已实现价格 = ${ctx.priceToRealized.toFixed(2)}。此前 3 轮周期底部，BTC 价格均跌破已实现价格，价格/已实现价格分别为 ${ratios}。`;
+        let text = `当前 BTC 价格 $${Math.round(ctx.price).toLocaleString()}，已实现价格 $${Math.round(ctx.realized).toLocaleString()}，价格/已实现价格 = ${ctx.priceToRealized.toFixed(2)}。此前 3 轮周期底部，BTC 价格均跌破已实现价格，价格/已实现价格分别为 ${ratios}。${this._staleNote(ctx.freshness)}`;
         if (ctx.aboveRealized) {
             text += `若重演该规律，约 $${Math.round(ctx.bottomLow).toLocaleString()}–$${Math.round(ctx.bottomHigh).toLocaleString()}。`;
         } else {
@@ -1121,6 +1177,9 @@ const DataModule = {
         const nupl = cur.nupl;
         const bt = this.HISTORICAL_BOTTOMS;
         const nuplBottoms = bt.map(x => x.nupl);
+        // NUPL 无法本地反推，链上滞后时直接标注数据日期
+        const fresh = this.getOnchainFreshness();
+        const stale = this._staleNote(fresh);
         // NUPL 分区（CheckOnChain 口径）
         let zoneLabel;
         if (nupl >= 0.75) zoneLabel = '欣快（>0.75，顶部风险区）';
@@ -1129,7 +1188,7 @@ const DataModule = {
         else if (nupl >= 0) zoneLabel = '希望/恐惧（0–0.25）';
         else zoneLabel = '投降（<0，市场整体亏损）';
         const nLo = Math.min(...nuplBottoms).toFixed(2), nHi = Math.max(...nuplBottoms).toFixed(2);
-        const head = `当前 NUPL = ${nupl.toFixed(3)}。历史周期底部 NUPL 约 ${nLo}–${nHi}。`;
+        const head = `当前 NUPL = ${nupl.toFixed(3)}。历史周期底部 NUPL 约 ${nLo}–${nHi}。${stale}`;
         let tail;
         if (nupl < 0) tail = `NUPL 已转负、市场整体亏损——这是历史周期底部的典型特征，当前已进入投降区，属历史价值区间，但仍需结合价格与已实现价格确认筑底。`;
         else if (nupl >= 0.75) tail = `NUPL 进入欣快区（>0.75），历史上对应周期顶部，浮盈过高、获利抛压风险大。`;
@@ -1159,7 +1218,7 @@ const DataModule = {
         const cur = this.getRiskRewardCurrent();
         if (!cur) return null;
         const rr = cur.rr;
-        const head = `当前 4Y R/R 比 = ${rr.toFixed(2)}。该比 = 上行空间/下行风险，>1 表示上行空间占优，<1 表示下行风险占优。`;
+        const head = `当前 4Y R/R 比 = ${rr.toFixed(2)}。该比 = 上行空间/下行风险，>1 表示上行空间占优，<1 表示下行风险占优。${this._staleNote(this.getOnchainFreshness())}`;
         let tail;
         if (rr >= 3) tail = `R/R ≥ 3，上行空间显著大于下行风险，处于历史低估区，是周期底部附近常见的风险回报结构。下行底线约 $${Math.round(cur.bearFloor).toLocaleString()}。`;
         else if (rr <= 0.3) tail = `R/R ≤ 0.3，下行风险显著大于上行空间，处于历史高估区，周期顶部风险区常见。上行天花板约 $${Math.round(cur.bullCeiling).toLocaleString()}。`;
